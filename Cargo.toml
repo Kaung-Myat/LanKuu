@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "crates/lankuu-core",
+    "crates/lankuu-cli",
+    "desktop/src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.1"
+edition = "2021"
+license = "MIT"

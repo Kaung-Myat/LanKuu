@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LanKuu",
+  "version": "0.2.1",
+  "identifier": "dev.lankuu.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "LanKuu",
+        "width": 1120,
+        "height": 740,
+        "minWidth": 880,
+        "minHeight": 620,
+        "center": true,
+        "decorations": false,
+        "resizable": true,
+        "shadow": true,
+        "backgroundColor": "#f4f3f0",
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "category": "Utility",
+    "shortDescription": "Fast local-network file and text sharing",
+    "longDescription": "LanKuu sends files and text directly between nearby devices on the same local network.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

@@ -1,0 +1,178 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Verify source
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test transfer core
+        run: cargo test -p lankuu-core --locked
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Lint Android app
+        working-directory: android
+        run: ./gradlew lintDebug
+
+  prepare-release:
+    name: Prepare draft release
+    needs: verify
+    runs-on: ubuntu-22.04
+    outputs:
+      release-id: ${{ steps.release.outputs.release-id }}
+    steps:
+      - name: Create or reuse draft release
+        id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = context.ref.replace("refs/tags/", "");
+            let release;
+
+            try {
+              const response = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              release = response.data;
+              if (!release.draft) {
+                core.setFailed(`Release ${tag} is already published.`);
+                return;
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              const response = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: `LanKuu ${tag}`,
+                draft: true,
+                prerelease: tag.includes("-"),
+                generate_release_notes: true,
+              });
+              release = response.data;
+            }
+
+            core.setOutput("release-id", String(release.id));
+
+  desktop:
+    name: Desktop · ${{ matrix.label }}
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Ubuntu x64
+            platform: ubuntu-22.04
+            args: --bundles deb,appimage
+            rust-targets: ""
+          - label: Windows x64
+            platform: windows-latest
+            args: --bundles nsis
+            rust-targets: ""
+          - label: macOS Apple Silicon
+            platform: macos-latest
+            args: --target aarch64-apple-darwin --bundles dmg
+            rust-targets: aarch64-apple-darwin
+          - label: macOS Intel
+            platform: macos-latest
+            args: --target x86_64-apple-darwin --bundles dmg
+            rust-targets: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install Ubuntu bundle dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Build and upload desktop bundle
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop/src-tauri
+          releaseId: ${{ needs.prepare-release.outputs.release-id }}
+          tagName: ${{ github.ref_name }}
+          args: ${{ matrix.args }}
+          retryAttempts: 2
+          releaseAssetNamePattern: "LanKuu_[version]_[platform]_[arch][setup][ext]"
+
+  android:
+    name: Android APK
+    needs: prepare-release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build installable APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk "LanKuu_${GITHUB_REF_NAME}_android.apk"
+          gh release upload "$GITHUB_REF_NAME" "LanKuu_${GITHUB_REF_NAME}_android.apk" --clobber
+
+  publish-release:
+    name: Publish release
+    needs:
+      - prepare-release
+      - desktop
+      - android
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish only after every build succeeds
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              ...context.repo,
+              release_id: Number("${{ needs.prepare-release.outputs.release-id }}"),
+              draft: false,
+            });

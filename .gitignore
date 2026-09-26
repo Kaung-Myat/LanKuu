@@ -1,0 +1,8 @@
+/target/
+/android/.gradle/
+/android/**/build/
+/android/local.properties
+/desktop/src-tauri/gen/
+*.part
+.idea/
+*.iml

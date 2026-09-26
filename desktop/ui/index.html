@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>LanKuu</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="titlebar">
+        <div class="titlebar-brand" data-tauri-drag-region>
+          <span class="app-mark">K</span><span>LanKuu</span>
+        </div>
+        <div class="titlebar-drag" data-tauri-drag-region></div>
+        <div class="privacy-status" data-tauri-drag-region><span></span>Local network only</div>
+        <div class="window-controls" aria-label="Window controls">
+          <button class="window-button" id="minimize-window" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5h10" /></svg></button>
+          <button class="window-button" id="maximize-window" aria-label="Maximize" title="Maximize"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1" /></svg></button>
+          <button class="window-button close" id="close-window" aria-label="Close" title="Close"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <nav class="primary-nav" aria-label="Primary navigation">
+            <button class="nav-item active" id="nav-share" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg><span>Share</span>
+            </button>
+            <button class="nav-item" id="nav-mirror" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H4V5Zm5 15h6M7 9a5 5 0 0 1 5 5M7 12a2 2 0 0 1 2 2" /></svg><span>Mirror</span>
+            </button>
+            <button class="nav-item" id="nav-inbox" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm0 9h4l2 2h4l2-2h4" /></svg><span>Inbox</span><span class="nav-badge" id="inbox-badge" hidden>0</span>
+            </button>
+          </nav>
+
+          <div class="sidebar-section">
+            <div class="section-heading">
+              <span>Nearby devices</span>
+              <button class="icon-button" id="refresh-devices" aria-label="Refresh nearby devices" title="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7a8 8 0 1 0 1 8M19 7v5h-5" /></svg></button>
+            </div>
+            <div class="device-list" id="device-list" aria-live="polite">
+              <div class="device-empty"><span class="empty-device-icon"></span><strong>Searching nearby</strong><small>Receivers on this network appear here.</small></div>
+            </div>
+            <label class="manual-address">
+              <span>Connect by IP address</span>
+              <div class="address-field">
+                <input id="manual-host" type="text" inputmode="url" placeholder="192.168.1.42" autocomplete="off" spellcheck="false" />
+                <button id="use-manual-host" aria-label="Use this address" title="Connect">→</button>
+              </div>
+            </label>
+          </div>
+
+          <div class="sidebar-actions">
+            <button class="sidebar-action" id="open-downloads" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v10h-17v-12Z" /></svg><span>Received files</span></button>
+            <button class="sidebar-action" id="theme-toggle" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4m0-12.8L17 7M7 17l-1.4 1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg><span>Appearance</span></button>
+          </div>
+        </aside>
+
+        <main class="main-content">
+          <section class="app-view active" id="share-view" aria-labelledby="share-title">
+            <header class="page-header">
+              <div><h1 id="share-title">Share</h1><p>Send files and text directly to a device on your network.</p></div>
+              <div class="receiver-control">
+                <div class="receiver-copy"><span class="status-dot"></span><div><strong id="receiver-label">Not receiving</strong><small id="receiver-caption">Turn on to appear nearby</small></div></div>
+                <button class="switch" id="receiver-toggle" role="switch" aria-checked="false" aria-label="Toggle receiver"><span></span></button>
+              </div>
+            </header>
+
+            <div class="share-layout">
+              <section class="card compose-card">
+                <div class="card-header destination-header">
+                  <div><span class="label">Destination</span>
+                    <div class="selected-device" id="selected-card">
+                      <span class="selected-device-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7V4Zm3 13h4" /></svg></span>
+                      <span><strong id="selected-name">No device selected</strong><small id="selected-address">Choose a nearby device or enter an IP address</small></span>
+                      <span class="selected-check" aria-hidden="true">✓</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="composer-section">
+                  <div class="section-title-row"><div><h2>Files</h2><p>Files are transferred directly without cloud storage.</p></div></div>
+                  <button class="drop-zone" id="drop-zone" type="button">
+                    <span class="drop-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14v5h14v-5" /></svg></span>
+                    <span class="drop-copy"><strong>Choose files or drop them here</strong><small id="drop-destination">Select a destination first</small></span>
+                    <span class="secondary-button">Browse files</span>
+                  </button>
+                </div>
+
+                <div class="composer-section text-section">
+                  <div class="section-title-row"><div><h2>Text</h2><p>Send a note, URL, or short message.</p></div><span class="character-count"><span id="character-count">0</span> / 16,384</span></div>
+                  <textarea id="message-input" maxlength="16384" placeholder="Type or paste text…"></textarea>
+                  <div class="message-actions"><span id="message-destination">Select a destination</span><button class="primary-button" id="send-message" disabled>Send text<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4.5 14-3-5.5L5 12Zm6.5 1.5L19 5" /></svg></button></div>
+                </div>
+              </section>
+
+              <section class="card activity-card">
+                <div class="card-header"><div><h2>Activity</h2><p>Current and recent transfers</p></div><button class="text-button" id="clear-completed">Clear finished</button></div>
+                <div class="transfer-list" id="transfer-list" aria-live="polite">
+                  <div class="activity-empty"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12m-4-4 4 4 4-4M5 4h14" /></svg><strong>No transfers yet</strong><small>Sent and received items will appear here.</small></div>
+                </div>
+              </section>
+            </div>
+
+            <footer class="app-footer"><span>LanKuu 0.1</span><span id="footer-status">Ready on your local network</span></footer>
+          </section>
+
+          <section class="app-view" id="mirror-view" aria-labelledby="mirror-title" hidden>
+            <header class="page-header mirror-header">
+              <div><h1 id="mirror-title">Screen mirror</h1><p>View your Android screen live over the same Wi-Fi network.</p></div>
+              <span class="mirror-security"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6V10Z" /></svg>WebRTC encrypted</span>
+            </header>
+
+            <div class="mirror-layout">
+              <section class="card mirror-control-card">
+                <div class="mirror-hero">
+                  <span class="mirror-hero-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm4 15h4M3 8a4 4 0 0 1 4 4m-4 0a1 1 0 0 1 1 1" /></svg></span>
+                  <div><span class="label">Native Android casting</span><h2 id="mirror-status-label">Receiver is off</h2><p id="mirror-status-caption">Start the receiver before casting from your phone.</p></div>
+                </div>
+                <div class="mirror-address-panel">
+                  <div><span class="label">This desktop device</span><strong id="mirror-address">Finding local IP…</strong></div>
+                  <div><span class="label">Signaling port</span><strong id="mirror-port">45456</strong></div>
+                  <button class="secondary-action" id="copy-mirror-address" type="button">Copy IP</button>
+                </div>
+                <button class="primary-button mirror-toggle" id="mirror-toggle" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z" /></svg><span>Start mirror receiver</span>
+                </button>
+              </section>
+
+              <section class="card mirror-guide-card">
+                <div class="card-header"><div><h2>Connect your phone</h2><p>Three quick steps</p></div><span class="latency-badge">Low latency</span></div>
+                <ol class="mirror-steps">
+                  <li><span>1</span><div><strong>Start the receiver</strong><p>LanKuu waits securely for your phone on this network.</p></div></li>
+                  <li><span>2</span><div><strong>Open Cast on Android</strong><p>Enter the desktop IP address shown here.</p></div></li>
+                  <li><span>3</span><div><strong>Allow screen sharing</strong><p>Tap Start mirroring and approve Android's prompt.</p></div></li>
+                </ol>
+                <div class="mirror-note"><strong>Adaptive, encrypted video</strong><p>WebRTC handles congestion and packet loss automatically. Touch control and phone audio are not included yet.</p></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="app-view" id="inbox-view" aria-labelledby="inbox-title" hidden>
+            <header class="page-header inbox-header">
+              <div><h1 id="inbox-title">Inbox</h1><p>Text received from phones and computers on your network.</p></div>
+              <button class="secondary-action" id="clear-inbox" type="button">Clear messages</button>
+            </header>
+            <section class="card inbox-card">
+              <div class="inbox-summary"><div><span class="label">Received text</span><strong><span id="inbox-message-count">0</span> <span id="inbox-message-label">messages</span></strong></div><span>Messages are kept for this session.</span></div>
+              <div class="message-list" id="message-list" aria-live="polite">
+                <div class="inbox-empty"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm0 9h4l2 2h4l2-2h4" /></svg><strong>No messages received</strong><p>Turn on receiving, then send text from the LanKuu Android app.</p></div>
+              </div>
+            </section>
+          </section>
+        </main>
+      </div>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
