@@ -16,6 +16,8 @@ const state = {
   messages: new Map(),
   receiverRunning: false,
   mirrorRunning: false,
+  mirrorSessions: [],
+  focusedMirrorSessionId: null,
   mirrorAddress: "",
   activeView: "share",
   unreadMessages: 0,
@@ -54,6 +56,9 @@ const elements = {
   mirrorAddress: document.querySelector("#mirror-address"),
   mirrorPort: document.querySelector("#mirror-port"),
   copyMirrorAddress: document.querySelector("#copy-mirror-address"),
+  mirrorSessionList: document.querySelector("#mirror-session-list"),
+  mirrorSessionCount: document.querySelector("#mirror-session-count"),
+  mirrorGridView: document.querySelector("#mirror-grid-view"),
   inboxBadge: document.querySelector("#inbox-badge"),
   inboxMessageCount: document.querySelector("#inbox-message-count"),
   inboxMessageLabel: document.querySelector("#inbox-message-label"),
@@ -64,6 +69,7 @@ const elements = {
 };
 
 let toastTimer;
+const openingMirrorSessions = new Set();
 
 function showToast(message) {
   elements.toast.textContent = message;
@@ -285,12 +291,181 @@ function setMirrorStatus(status) {
   state.mirrorAddress = status?.address || state.mirrorAddress || "Your desktop IP";
   elements.mirrorAddress.textContent = state.mirrorAddress;
   elements.mirrorPort.textContent = String(status?.port || 45456);
-  elements.mirrorStatusLabel.textContent = running ? "Waiting for Android" : "Receiver is off";
-  elements.mirrorStatusCaption.textContent = running
-    ? "The player is ready. Start casting from your phone."
-    : "Start the receiver before casting from your phone.";
   elements.mirrorToggle.classList.toggle("stop", running);
   elements.mirrorToggleLabel.textContent = running ? "Stop mirror receiver" : "Start mirror receiver";
+  updateMirrorSummary();
+}
+
+function updateMirrorSummary() {
+  const total = state.mirrorSessions.length;
+  const live = state.mirrorSessions.filter((session) => session.status === "live").length;
+  elements.mirrorSessionCount.textContent = `${total} of 4 connected`;
+  if (!state.mirrorRunning) {
+    elements.mirrorStatusLabel.textContent = "Receiver is off";
+    elements.mirrorStatusCaption.textContent = "Start the receiver before casting from a device.";
+  } else if (total === 0) {
+    elements.mirrorStatusLabel.textContent = "Waiting for devices";
+    elements.mirrorStatusCaption.textContent = "Up to four devices can connect at the same time.";
+  } else {
+    elements.mirrorStatusLabel.textContent = `${live || total} ${live === 1 || (live === 0 && total === 1) ? "device" : "devices"} live`;
+    elements.mirrorStatusCaption.textContent = "Each WebRTC session is encrypted and controlled independently.";
+  }
+}
+
+function elapsedLabel(startedAtMs) {
+  const seconds = Math.max(0, Math.floor((Date.now() - Number(startedAtMs || Date.now())) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
+}
+
+function statusLabel(status) {
+  return ({
+    negotiating: "Connecting",
+    connecting: "Connecting",
+    live: "Live",
+    reconnecting: "Reconnecting",
+    stopping: "Stopping",
+    failed: "Failed",
+  })[status] || "Connecting";
+}
+
+function renderMirrorSessions() {
+  elements.mirrorSessionList.replaceChildren();
+  elements.mirrorSessionList.classList.toggle("focused", Boolean(state.focusedMirrorSessionId));
+  elements.mirrorGridView.hidden = !state.focusedMirrorSessionId;
+  if (state.mirrorSessions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "mirror-session-empty";
+    empty.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm4 15h4M3 8a4 4 0 0 1 4 4" /></svg><strong>No screens connected</strong><p>Start mirroring from a nearby device after turning on the receiver.</p>';
+    elements.mirrorSessionList.append(empty);
+    updateMirrorSummary();
+    return;
+  }
+
+  for (const session of state.mirrorSessions) {
+    const isOpeningPlayer = openingMirrorSessions.has(session.id);
+    const tile = document.createElement("article");
+    tile.className = "mirror-video-tile";
+    tile.classList.toggle("opening-player", isOpeningPlayer);
+    if (state.focusedMirrorSessionId === session.id) tile.classList.add("focused");
+    if (state.focusedMirrorSessionId && state.focusedMirrorSessionId !== session.id) tile.hidden = true;
+
+    const stage = document.createElement("div");
+    stage.className = "mirror-video-stage";
+    const placeholder = document.createElement("div");
+    placeholder.className = "mirror-video-placeholder";
+    const avatar = document.createElement("span");
+    avatar.className = "mirror-session-avatar";
+    avatar.textContent = initials(session.deviceName || session.platform || "Device");
+    const waiting = document.createElement("small");
+    waiting.textContent = isOpeningPlayer
+      ? "Opening player…"
+      : session.status === "live"
+      ? "Playing in its own LanKuu Mirror window"
+      : session.status === "failed" ? "Stream unavailable" : "Opening native player window…";
+    placeholder.append(avatar, waiting);
+    stage.append(placeholder);
+
+    const footer = document.createElement("div");
+    footer.className = "mirror-video-footer";
+    const details = document.createElement("div");
+    details.className = "mirror-session-details";
+    const heading = document.createElement("div");
+    heading.className = "mirror-session-heading";
+    const name = document.createElement("strong");
+    name.textContent = session.deviceName || "Nearby device";
+    const badge = document.createElement("span");
+    badge.className = `mirror-session-status ${session.status || "negotiating"}`;
+    badge.textContent = statusLabel(session.status);
+    heading.append(name, badge);
+    const meta = document.createElement("p");
+    const duration = document.createElement("span");
+    duration.className = "mirror-session-duration";
+    duration.dataset.startedAt = String(session.startedAtMs || Date.now());
+    duration.textContent = elapsedLabel(session.startedAtMs);
+    meta.append(`${session.platform || "device"} · ${session.address || "Local network"} · `, duration);
+    details.append(heading, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "mirror-session-actions";
+    const view = document.createElement("button");
+    view.type = "button";
+    view.className = "mirror-session-button view";
+    view.title = "Open player";
+    view.setAttribute("aria-label", `Open ${session.deviceName || "device"} player window`);
+    view.classList.toggle("loading", isOpeningPlayer);
+    view.setAttribute("aria-busy", String(isOpeningPlayer));
+    view.innerHTML = isOpeningPlayer
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke-dasharray="32 18" /></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z" /></svg>';
+    view.disabled = isOpeningPlayer || (session.status !== "live" && session.status !== "reconnecting");
+    view.addEventListener("click", () => showMirrorSession(session));
+
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.className = "mirror-session-button stop";
+    stop.title = "Stop this mirror session";
+    stop.setAttribute("aria-label", `Stop ${session.deviceName || "device"}`);
+    stop.disabled = session.status === "stopping";
+    stop.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1" /></svg>';
+    stop.addEventListener("click", () => stopMirrorSession(session, stop));
+    actions.append(view, stop);
+    footer.append(details, actions);
+    tile.append(stage, footer);
+    elements.mirrorSessionList.append(tile);
+  }
+  updateMirrorSummary();
+}
+
+function setMirrorSessions(sessions) {
+  state.mirrorSessions = Array.isArray(sessions) ? sessions : [];
+  if (
+    state.focusedMirrorSessionId &&
+    !state.mirrorSessions.some((session) => session.id === state.focusedMirrorSessionId)
+  ) {
+    state.focusedMirrorSessionId = null;
+  }
+  renderMirrorSessions();
+}
+
+function focusMirrorSession(sessionId) {
+  state.focusedMirrorSessionId = state.focusedMirrorSessionId === sessionId ? null : sessionId;
+  renderMirrorSessions();
+}
+
+async function stopMirrorSession(session, button) {
+  button.disabled = true;
+  try {
+    if (isTauri) {
+      setMirrorSessions(await invoke("stop_mirror_session", { sessionId: session.id }));
+    } else {
+      setMirrorSessions(state.mirrorSessions.filter((item) => item.id !== session.id));
+    }
+    showToast(`Stopping ${session.deviceName || "mirror session"}…`);
+  } catch (error) {
+    button.disabled = false;
+    reportActionError("Stop mirror session", error);
+  }
+}
+
+async function showMirrorSession(session) {
+  if (openingMirrorSessions.has(session.id)) return;
+  openingMirrorSessions.add(session.id);
+  renderMirrorSessions();
+  showToast("Opening player…");
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  try {
+    if (isTauri) {
+      await invoke("show_mirror_session", { sessionId: session.id });
+    }
+    showToast("Player opened.");
+  } catch (error) {
+    reportActionError("Open mirror player", error);
+  } finally {
+    openingMirrorSessions.delete(session.id);
+    renderMirrorSessions();
+  }
 }
 
 async function toggleMirrorReceiver() {
@@ -543,13 +718,8 @@ async function registerNativeEvents() {
   await listen("transfer-event", (event) => updateTransfer(event.payload));
   await listen("receiver-status", (event) => setReceiverStatus(event.payload.running, event.payload.directory));
   await listen("mirror-status", (event) => setMirrorStatus(event.payload));
-  await listen("mirror-peer-status", (event) => {
-    if (!state.mirrorRunning) return;
-    elements.mirrorStatusLabel.textContent = event.payload;
-    elements.mirrorStatusCaption.textContent = event.payload === "Android connected securely"
-      ? "WebRTC is adapting video quality to your local network."
-      : "Keep LanKuu open on both devices while the session connects.";
-  });
+  await listen("mirror-sessions", (event) => setMirrorSessions(event.payload));
+  await listen("mirror-stop-all", () => setMirrorSessions([]));
   await listen("app-error", (event) => showToast(event.payload));
 
   const currentWebview = tauri?.webviewWindow?.getCurrentWebviewWindow?.();
@@ -568,6 +738,10 @@ function bindActions() {
   elements.navInbox.addEventListener("click", () => switchView("inbox"));
   elements.mirrorToggle.addEventListener("click", toggleMirrorReceiver);
   elements.copyMirrorAddress.addEventListener("click", copyMirrorAddress);
+  elements.mirrorGridView.addEventListener("click", () => {
+    state.focusedMirrorSessionId = null;
+    renderMirrorSessions();
+  });
   elements.clearInbox.addEventListener("click", () => {
     state.messages.clear();
     state.unreadMessages = 0;
@@ -657,6 +831,7 @@ async function initialize() {
       const status = await invoke("receiver_status");
       setReceiverStatus(status.running, status.directory);
       setMirrorStatus(await invoke("mirror_status"));
+      setMirrorSessions(await invoke("mirror_sessions"));
     } catch (error) {
       showToast(`Could not read receiver status: ${error}`);
     }
@@ -669,6 +844,14 @@ async function initialize() {
   if (!isTauri && new URLSearchParams(window.location.search).get("demo") === "inbox") {
     addDemoIncomingMessage();
   }
+  if (!isTauri && new URLSearchParams(window.location.search).get("demo") === "mirror") {
+    switchView("mirror");
+    setMirrorStatus({ running: true, address: "192.168.1.56", port: 45456 });
+    setMirrorSessions([
+      { id: "demo-a", deviceName: "Pixel 8", platform: "android", address: "192.168.1.42", status: "live", startedAtMs: Date.now() - 83_000 },
+      { id: "demo-b", deviceName: "Galaxy A54", platform: "android", address: "192.168.1.43", status: "negotiating", startedAtMs: Date.now() - 8_000 },
+    ]);
+  }
 }
 
 window.addEventListener("error", (event) => {
@@ -680,4 +863,11 @@ initialize().catch((error) => {
   console.error("LanKuu initialization failed", error);
   showToast(`Startup error: ${error}`);
 });
+
+setInterval(() => {
+  if (state.activeView !== "mirror") return;
+  for (const duration of document.querySelectorAll(".mirror-session-duration")) {
+    duration.textContent = elapsedLabel(duration.dataset.startedAt);
+  }
+}, 1000);
 })();

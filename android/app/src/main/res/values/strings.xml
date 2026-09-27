@@ -103,6 +103,6 @@
     <string name="no_activity">Transfers and receiver updates will appear here.</string>
     <string name="ready_trusted_network">Ready on your local network</string>
     <string name="enter_peer_ip">Enter a destination IP or discover nearby devices first.</string>
-    <string name="security_note">LanKuu 0.1 · Use only on a trusted local network</string>
+    <string name="security_note">LanKuu 0.4 · Use only on a trusted local network</string>
     <string name="direct_transfer_note">Direct transfer · No cloud storage</string>
 </resources>

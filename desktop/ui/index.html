@@ -105,12 +105,12 @@
               </section>
             </div>
 
-            <footer class="app-footer"><span>LanKuu 0.1</span><span id="footer-status">Ready on your local network</span></footer>
+            <footer class="app-footer"><span>LanKuu 0.4</span><span id="footer-status">Ready on your local network</span></footer>
           </section>
 
           <section class="app-view" id="mirror-view" aria-labelledby="mirror-title" hidden>
             <header class="page-header mirror-header">
-              <div><h1 id="mirror-title">Screen mirror</h1><p>View your Android screen live over the same Wi-Fi network.</p></div>
+              <div><h1 id="mirror-title">Screen mirror</h1><p>View up to four nearby devices live over the same Wi-Fi network.</p></div>
               <span class="mirror-security"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6V10Z" /></svg>WebRTC encrypted</span>
             </header>
 
@@ -118,7 +118,7 @@
               <section class="card mirror-control-card">
                 <div class="mirror-hero">
                   <span class="mirror-hero-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm4 15h4M3 8a4 4 0 0 1 4 4m-4 0a1 1 0 0 1 1 1" /></svg></span>
-                  <div><span class="label">Native Android casting</span><h2 id="mirror-status-label">Receiver is off</h2><p id="mirror-status-caption">Start the receiver before casting from your phone.</p></div>
+                  <div><span class="label">Multi-device casting</span><h2 id="mirror-status-label">Receiver is off</h2><p id="mirror-status-caption">Start the receiver before casting from a device.</p></div>
                 </div>
                 <div class="mirror-address-panel">
                   <div><span class="label">This desktop device</span><strong id="mirror-address">Finding local IP…</strong></div>
@@ -140,6 +140,23 @@
                 <div class="mirror-note"><strong>Adaptive, encrypted video</strong><p>WebRTC handles congestion and packet loss automatically. Touch control and phone audio are not included yet.</p></div>
               </section>
             </div>
+
+            <section class="card mirror-sessions-card">
+              <div class="card-header mirror-sessions-header">
+                <div><h2>Live devices</h2><p>Each screen plays in its own native low-latency window.</p></div>
+                <div class="mirror-session-toolbar">
+                  <button class="secondary-action" id="mirror-grid-view" type="button" hidden>Grid view</button>
+                  <span class="mirror-count" id="mirror-session-count">0 of 4 connected</span>
+                </div>
+              </div>
+              <div class="mirror-video-grid" id="mirror-session-list" aria-live="polite">
+                <div class="mirror-session-empty">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm4 15h4M3 8a4 4 0 0 1 4 4" /></svg>
+                  <strong>No screens connected</strong>
+                  <p>Start mirroring from a nearby device after turning on the receiver.</p>
+                </div>
+              </div>
+            </section>
           </section>
 
           <section class="app-view" id="inbox-view" aria-labelledby="inbox-title" hidden>

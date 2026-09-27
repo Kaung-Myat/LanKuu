@@ -3,6 +3,8 @@ package dev.lankuu.app
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import org.json.JSONObject
 import org.webrtc.DataChannel
@@ -27,6 +29,8 @@ import java.io.DataOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -42,6 +46,7 @@ internal class WebRtcMirrorClient(
     private val closed = AtomicBoolean(false)
     private val connected = AtomicBoolean(false)
     private val iceGathered = CountDownLatch(1)
+    private val sessionId = UUID.randomUUID().toString()
     private var eglBase: EglBase? = null
     private var factory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
@@ -49,6 +54,7 @@ internal class WebRtcMirrorClient(
     private var surfaceHelper: SurfaceTextureHelper? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
+    private var controlChannel: DataChannel? = null
 
     fun start() {
         initializeWebRtc()
@@ -109,6 +115,9 @@ internal class WebRtcMirrorClient(
         val peer = rtcFactory.createPeerConnection(config, peerObserver)
             ?: error("Could not create a WebRTC peer connection")
         peerConnection = peer
+        val control = peer.createDataChannel(CONTROL_CHANNEL_ID, DataChannel.Init())
+        control.registerObserver(controlObserver)
+        controlChannel = control
         val sender = peer.addTrack(track, listOf(STREAM_ID))
             ?: error("Could not add the screen video track")
         sender.getParameters().also { parameters ->
@@ -154,6 +163,11 @@ internal class WebRtcMirrorClient(
         val request = JSONObject()
             .put("type", offer.type.canonicalForm())
             .put("sdp", offer.description)
+            .put("protocolVersion", MIRROR_PROTOCOL_VERSION)
+            .put("sessionId", sessionId)
+            .put("deviceId", deviceId())
+            .put("deviceName", deviceName())
+            .put("platform", "android")
             .toString()
             .toByteArray(StandardCharsets.UTF_8)
         require(request.size <= MAX_SIGNAL_BYTES) { "WebRTC offer is too large" }
@@ -211,9 +225,33 @@ internal class WebRtcMirrorClient(
         }
     }
 
+    private val controlObserver = object : DataChannel.Observer {
+        override fun onBufferedAmountChange(previousAmount: Long) = Unit
+
+        override fun onStateChange() = Unit
+
+        override fun onMessage(buffer: DataChannel.Buffer) {
+            if (buffer.binary || closed.get()) return
+            runCatching {
+                val data = buffer.data.asReadOnlyBuffer()
+                val bytes = ByteArray(data.remaining())
+                data.get(bytes)
+                JSONObject(String(bytes, StandardCharsets.UTF_8))
+            }.onSuccess { message ->
+                if (message.optString("type") == "stop_session") onClosed()
+            }.onFailure { error ->
+                Log.w(LOG_TAG, "Ignored invalid desktop control message", error)
+            }
+        }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         runCatching { capturer?.stopCapture() }
+        runCatching { controlChannel?.unregisterObserver() }
+        runCatching { controlChannel?.close() }
+        runCatching { controlChannel?.dispose() }
+        controlChannel = null
         runCatching { peerConnection?.close() }
         runCatching { peerConnection?.dispose() }
         peerConnection = null
@@ -237,6 +275,19 @@ internal class WebRtcMirrorClient(
         val scaledWidth = ((width * scale).toInt() / 2) * 2
         val scaledHeight = ((height * scale).toInt() / 2) * 2
         return maxOf(2, scaledWidth) to maxOf(2, scaledHeight)
+    }
+
+    private fun deviceId(): String = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ANDROID_ID,
+    ).orEmpty().ifBlank { "android-${Build.DEVICE}" }
+
+    private fun deviceName(): String {
+        val manufacturer = Build.MANUFACTURER.trim()
+        val model = Build.MODEL.trim()
+        if (manufacturer.isBlank()) return model.ifBlank { "Android device" }
+        if (model.startsWith(manufacturer, ignoreCase = true)) return model
+        return "${manufacturer.replaceFirstChar { it.titlecase(Locale.getDefault()) }} $model".trim()
     }
 
     private class SdpAwaiter : SdpObserver {
@@ -281,6 +332,8 @@ internal class WebRtcMirrorClient(
     private companion object {
         const val VIDEO_TRACK_ID = "lankuu-screen"
         const val STREAM_ID = "lankuu-mirror"
+        const val CONTROL_CHANNEL_ID = "lankuu-control"
+        const val MIRROR_PROTOCOL_VERSION = 3
         const val VIDEO_FRAME_RATE = 30
         const val MAX_DIMENSION = 1_280
         const val MIN_VIDEO_BIT_RATE = 600_000

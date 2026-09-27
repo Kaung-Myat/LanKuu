@@ -18,7 +18,8 @@ and an Android APK that speak the same small streaming protocol.
 - Select and send multiple Android files as an ordered transfer batch
 - Use a polished desktop interface with file picking, text sharing, live
   progress, receiver controls, and transfer activity
-- Mirror an Android screen to Ubuntu over the LAN with hardware H.264 encoding
+- Mirror up to four Android screens concurrently to one desktop over the LAN
+  with hardware H.264 encoding and per-device Stop controls
 - Transfer between CLI ↔ CLI, CLI ↔ Android, and Android ↔ Android
 
 ## Ubuntu CLI
@@ -57,8 +58,18 @@ Install the official Tauri Linux prerequisites on Ubuntu:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev ffmpeg
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+  ffmpeg
 ```
+
+The release `.deb` declares FFmpeg as a dependency. Install it separately before
+using mirroring from an `.AppImage`. The manual command above is only needed
+when running or building LanKuu from source.
+LanKuu terminates WebRTC in native Rust because Ubuntu's WebKit build does not
+expose `RTCPeerConnection`, and its embedded H.264 WebCodecs decoder is not
+reliable across Ubuntu builds. Each connected stream therefore opens in its own
+native low-latency FFplay window. The LanKuu page remains the multi-device
+session and stop-control panel.
 
 Run a development build:
 
@@ -78,18 +89,32 @@ files are stored in `~/Downloads/LanKuu`.
 
 ### Native screen mirroring
 
-1. Put the Android phone and Ubuntu computer on the same trusted network.
+1. Put the Android phones and desktop computer on the same trusted network.
 2. Open **Mirror** in the desktop app and select **Start mirror receiver**.
 3. Open **Cast** in the Android app, enter the Ubuntu IP shown on desktop, and
    select **Start mirroring**.
-4. Accept Android's system screen-sharing prompt. Video opens in a low-latency
-   `ffplay` window. Stop from either app when finished.
+4. Accept Android's system screen-sharing prompt. Each device appears as a
+   low-latency video tile inside LanKuu and in its own player window. Repeat on
+   up to four phones.
+5. Stop one phone from its list item without interrupting the other sessions,
+   or turn off the receiver to stop every session.
+
+Each device has its own native player window. The Play action opens that
+device's player again after it was closed. LanKuu shows an in-card loading state
+while the native player starts, reports a real process failure, and keeps the
+main window in place while the always-on-top player appears above it. Use the
+Stop action beside a device to end only that device's mirroring session.
+The desktop preserves the current H.264 key-frame sequence when reopening a
+player, preventing a black wait for the next encoder key frame.
 
 Mirroring uses MediaProjection, hardware H.264 encoding, and a direct WebRTC
 peer connection. TCP port `45456` exchanges the one-time SDP offer/answer;
 WebRTC then chooses a direct dynamic UDP media path, encrypts video with
-DTLS-SRTP, and adapts bitrate using network feedback. The current MVP is
-view-only: it does not transmit audio or support desktop touch/keyboard control.
+DTLS-SRTP, and adapts bitrate using network feedback. The desktop's native Rust
+peer depacketizes complete H.264 frames and sends them to each native FFplay
+window. A WebRTC control channel lets the desktop stop an individual Android
+capture cleanly. The current MVP is view-only: it does not transmit audio or
+support desktop touch/keyboard control.
 
 ## Android APK
 
@@ -124,7 +149,7 @@ crates/lankuu-cli/   Ubuntu/Linux command-line app
 desktop/             Tauri desktop app and macOS-inspired interface
 android/             Kotlin Android application
 docs/protocol-v1.md  Cross-platform wire protocol
-docs/mirror-v2.md    Direct-LAN WebRTC mirroring protocol
+docs/mirror-v3.md    Multi-session direct-LAN WebRTC mirroring protocol
 ```
 
 ## Current MVP limitations

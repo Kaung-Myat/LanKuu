@@ -31,6 +31,7 @@ struct MirrorTask {
 struct DesktopState {
     receiver: Mutex<Option<ReceiverTask>>,
     mirror: Mutex<Option<MirrorTask>>,
+    mirror_sessions: mirror::SessionRegistry,
     next_transfer_id: AtomicU64,
 }
 
@@ -39,6 +40,7 @@ impl Default for DesktopState {
         Self {
             receiver: Mutex::new(None),
             mirror: Mutex::new(None),
+            mirror_sessions: mirror::SessionRegistry::default(),
             next_transfer_id: AtomicU64::new(1),
         }
     }
@@ -281,7 +283,8 @@ fn start_mirror_receiver(
     app: AppHandle,
     state: State<'_, DesktopState>,
 ) -> Result<MirrorView, String> {
-    mirror::ensure_player_available()?;
+    ensure_mirror_runtime()?;
+
     let mut mirror = state
         .mirror
         .lock()
@@ -309,13 +312,20 @@ fn start_mirror_receiver(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let thread_app = app.clone();
+    let thread_sessions = state.mirror_sessions.clone();
     let task = thread::spawn(move || {
         emit_mirror_status(&thread_app, true);
-        if let Err(error) = mirror::run(listener, Arc::clone(&thread_stop), thread_app.clone()) {
+        if let Err(error) = mirror::run(
+            listener,
+            Arc::clone(&thread_stop),
+            thread_sessions.clone(),
+            thread_app.clone(),
+        ) {
             if !thread_stop.load(Ordering::Relaxed) {
                 let _ = thread_app.emit("app-error", format!("WebRTC receiver stopped: {error}"));
             }
         }
+        mirror::emit_sessions(&thread_app, &thread_sessions);
         emit_mirror_status(&thread_app, false);
     });
 
@@ -324,18 +334,49 @@ fn start_mirror_receiver(
 }
 
 #[tauri::command]
-fn stop_mirror_receiver(state: State<'_, DesktopState>) -> Result<MirrorView, String> {
+fn stop_mirror_receiver(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<MirrorView, String> {
     let mut mirror = state
         .mirror
         .lock()
         .map_err(|_| "mirror state is unavailable".to_owned())?;
     if let Some(task) = mirror.take() {
+        mirror::stop_all_sessions(&state.mirror_sessions);
+        let _ = app.emit("mirror-stop-all", ());
         task.stop.store(true, Ordering::Relaxed);
         thread::spawn(move || {
             let _ = task.thread.join();
         });
     }
     Ok(mirror_view(false))
+}
+
+#[tauri::command]
+fn mirror_sessions(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<mirror::MirrorSessionView>, String> {
+    mirror::session_views(&state.mirror_sessions)
+}
+
+#[tauri::command]
+fn stop_mirror_session(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<Vec<mirror::MirrorSessionView>, String> {
+    mirror::stop_session(&state.mirror_sessions, &session_id)
+}
+
+#[tauri::command]
+async fn show_mirror_session(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<(), String> {
+    let sessions = state.mirror_sessions.clone();
+    tauri::async_runtime::spawn_blocking(move || mirror::show_session(&sessions, &session_id))
+        .await
+        .map_err(|error| format!("could not open mirror player: {error}"))?
 }
 
 #[tauri::command]
@@ -670,6 +711,27 @@ fn device_name() -> String {
         .unwrap_or_else(|| "LanKuu Desktop".to_owned())
 }
 
+#[cfg(target_os = "linux")]
+fn ensure_mirror_runtime() -> Result<(), String> {
+    let player_available = Command::new("ffplay")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !player_available {
+        return Err(
+            "Ubuntu mirror player is missing. Install ffmpeg, then restart LanKuu.".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_mirror_runtime() -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -692,6 +754,9 @@ pub fn run() {
             start_mirror_receiver,
             stop_mirror_receiver,
             mirror_status,
+            mirror_sessions,
+            stop_mirror_session,
+            show_mirror_session,
             open_downloads,
             minimize_window,
             toggle_maximize_window,
