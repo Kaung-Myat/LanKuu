@@ -1,33 +1,145 @@
 # LanKuu
 
-LanKuu sends files and text directly between devices on the same local network.
-The MVP includes a native Ubuntu/Linux CLI, a cross-platform Tauri desktop app,
-and an Android APK that speak the same small streaming protocol.
+[![Release](https://github.com/Kaung-Myat/LanKuu/actions/workflows/release.yml/badge.svg)](https://github.com/Kaung-Myat/LanKuu/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/Kaung-Myat/LanKuu?display_name=tag)](https://github.com/Kaung-Myat/LanKuu/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **MVP security notice:** File/text transfer traffic is not yet encrypted or
-> authenticated. Mirroring media is encrypted by WebRTC, but device pairing is
-> still planned before the first stable release.
+**Fast, private file sharing and multi-device screen mirroring over your local
+network.**
 
-## What works
+LanKuu connects nearby devices directly over the same Wi-Fi or Ethernet
+network. It can stream large files without loading them into memory, exchange
+text, discover receivers automatically, and mirror up to four Android screens
+to an Ubuntu desktop at the same time. No account or cloud relay is required.
 
-- Stream files without loading them into memory, including multi-gigabyte files
-- Send UTF-8 text
-- Discover receiving devices with a UDP broadcast
-- Save Linux downloads without overwriting an existing file
-- Save Android downloads in `Downloads/LanKuu`
-- Select and send multiple Android files as an ordered transfer batch
-- Use a polished desktop interface with file picking, text sharing, live
-  progress, receiver controls, and transfer activity
-- Mirror up to four Android screens concurrently to one desktop over the LAN
-  with hardware H.264 encoding and per-device Stop controls
-- Transfer between CLI ↔ CLI, CLI ↔ Android, and Android ↔ Android
+> [!IMPORTANT]
+> LanKuu is currently an MVP. Use it only on a trusted local network. File and
+> text transfers are not yet encrypted or authenticated. WebRTC mirroring media
+> is encrypted with DTLS-SRTP, but signaling and device identity are not yet
+> authenticated.
 
-## Ubuntu CLI
+## Contents
 
-Build and test:
+- [Highlights](#highlights)
+- [Platform status](#platform-status)
+- [System architecture](#system-architecture)
+- [Quick start](#quick-start)
+- [File and text transfer](#file-and-text-transfer)
+- [Multi-device screen mirroring](#multi-device-screen-mirroring)
+- [Build from source](#build-from-source)
+- [Release automation](#release-automation)
+- [Security and limitations](#security-and-limitations)
+- [Roadmap](#roadmap)
+
+## Highlights
+
+- Direct LAN transfer with no account, cloud storage, or Internet connection
+- Streaming file I/O suitable for multi-gigabyte files
+- UTF-8 text sharing and ordered multi-file batches
+- UDP discovery with manual IP connection as a fallback
+- Collision-safe file names and temporary files for incomplete transfers
+- Native Ubuntu CLI and a Tauri desktop interface
+- Android sender and receiver with a safe-area-aware multi-screen interface
+- Up to four concurrent Android-to-desktop WebRTC mirror sessions
+- Hardware H.264 capture, adaptive WebRTC transport, and independent players
+- Per-device Play and Stop controls without interrupting other mirror sessions
+- Automated Ubuntu, Windows, macOS, and Android release builds
+
+## Platform status
+
+| Platform | File and text transfer | Screen mirroring | Status |
+|---|---|---|---|
+| Ubuntu CLI | Send and receive | — | Supported |
+| Ubuntu desktop | Send and receive | Receive up to four Android streams | Primary tested desktop |
+| Android 10+ | Send and receive | Share the Android screen | Supported |
+| Windows | Desktop build available | Runtime validation pending | Preview |
+| macOS Intel / Apple Silicon | Desktop build available | Runtime validation pending | Preview |
+| iOS | — | — | Planned |
+
+## System architecture
+
+LanKuu separates discovery, transfer, signaling, and media traffic so that a
+large file cannot block discovery or another mirror session.
+
+```mermaid
+flowchart LR
+    subgraph Sources[LanKuu devices]
+        CLI[Ubuntu CLI]
+        Desktop[Tauri desktop app]
+        Android[Android app]
+    end
+
+    Discovery[UDP discovery<br/>port 45455]
+    Transfer[TCP transfer service<br/>port 45454]
+    Signaling[TCP WebRTC signaling<br/>port 45456]
+
+    CLI <-->|Discover| Discovery
+    Desktop <-->|Discover| Discovery
+    Android <-->|Discover| Discovery
+
+    CLI <-->|Files and text| Transfer
+    Desktop <-->|Files and text| Transfer
+    Android <-->|Files and text| Transfer
+
+    Android -->|SDP offer and metadata| Signaling
+    Signaling -->|SDP answer| Android
+    Android ==>|Encrypted WebRTC media| Mirror[Native Rust mirror receiver]
+    Mirror --> Player[Independent FFplay windows]
+```
+
+### Network services
+
+| Purpose | Transport | Port | Notes |
+|---|---|---:|---|
+| File and text transfer | TCP | `45454` | One connection per payload |
+| Nearby-device discovery | UDP | `45455` | Broadcast query, unicast response |
+| Mirror signaling | TCP | `45456` | Length-prefixed SDP exchange |
+| Mirror media and control | WebRTC | Dynamic UDP | DTLS-SRTP media and data channel |
+
+Guest Wi-Fi, client isolation, VPN software, or a firewall may prevent devices
+from discovering or reaching one another even when they appear to use the same
+network.
+
+## Quick start
+
+Download the appropriate package from
+[GitHub Releases](https://github.com/Kaung-Myat/LanKuu/releases).
+
+### Ubuntu desktop
+
+Install the Debian package:
 
 ```bash
-cargo test
+sudo apt install ./LanKuu_*.deb
+```
+
+The Debian package declares FFmpeg as a dependency because native mirror
+windows use `ffplay`. If you use the AppImage, install FFmpeg separately:
+
+```bash
+sudo apt install ffmpeg
+```
+
+Launch LanKuu, turn on **Ready to receive**, and select a nearby device or enter
+its IP address manually.
+
+### Android
+
+Install the release APK, allow Android to install the package when prompted,
+and open LanKuu. Use:
+
+- **Share** to send text or one or more files;
+- **Cast** to mirror the Android screen to a desktop;
+- **Inbox** and **Activity** to inspect received content and transfers.
+
+The current CI artifact is debug-signed for MVP testing. Production signing is
+required before Play Store distribution.
+
+### Ubuntu CLI (source build)
+
+Build the CLI first:
+
+```bash
 cargo build --release -p lankuu
 ```
 
@@ -37,7 +149,7 @@ Start a receiver:
 ./target/release/lankuu receive
 ```
 
-Find receivers and send content:
+Discover receivers, send a file, or send text:
 
 ```bash
 ./target/release/lankuu discover
@@ -45,31 +157,126 @@ Find receivers and send content:
 ./target/release/lankuu send-text 192.168.1.42 "mingalaba"
 ```
 
-Received files default to `~/Downloads/LanKuu`. Use `lankuu help` for all
-options.
+Received files default to `~/Downloads/LanKuu`. Run
+`./target/release/lankuu help` to see all options, including custom bind
+addresses, output directories, ports, and single-transfer receiver mode.
 
-## Desktop app
+## File and text transfer
 
-The desktop app uses Tauri 2 with a dependency-free HTML/CSS/JavaScript
-frontend and the shared Rust transfer core. Tagged GitHub releases build
-installers for Ubuntu, Windows, and both Intel and Apple Silicon Macs.
+Every selected file is sent through an independent protocol v1 connection.
+The receiver streams the declared number of bytes into a temporary file,
+flushes it to disk, publishes it under a collision-safe name, and only then
+returns an acknowledgment.
 
-Install the official Tauri Linux prerequisites on Ubuntu:
+```mermaid
+sequenceDiagram
+    participant S as Sender
+    participant D as UDP discovery
+    participant R as Receiver
+    participant F as Local storage
+
+    S->>D: LANKUU_DISCOVER_V1
+    R-->>S: Device name, address, TCP port
+    S->>R: Connect to TCP 45454
+    S->>R: Header: kind, name, payload length
+    loop Stream without loading the whole file
+        S->>R: Raw payload bytes
+        R->>F: Append to temporary .part file
+    end
+    R->>F: Flush, sync, and rename
+    R-->>S: OK or ER
+```
+
+Multi-file selections repeat this flow in order. A failed item does not cancel
+the remaining batch. Text is UTF-8 and limited to 16 MiB. See
+[`docs/protocol-v1.md`](docs/protocol-v1.md) for the byte-level frame format and
+compatibility rules.
+
+## Multi-device screen mirroring
+
+### Start mirroring
+
+1. Connect the Android devices and Ubuntu computer to the same trusted network.
+2. Open **Mirror** on the desktop and select **Start mirror receiver**.
+3. Open **Cast** on Android and select the discovered desktop, or enter the
+   desktop IP address shown by LanKuu.
+4. Select **Start mirroring** and approve Android's system capture prompt.
+5. Repeat on additional phones. The desktop accepts up to four active sources.
+
+Each source owns an independent WebRTC peer connection, lifecycle state,
+control channel, H.264 pipeline, and native player. Stopping one source does not
+interrupt the others.
+
+```mermaid
+flowchart TB
+    A[Android device A<br/>MediaProjection and H.264] -->|Offer over TCP 45456| Registry
+    B[Android device B<br/>MediaProjection and H.264] -->|Offer over TCP 45456| Registry
+    C[Android device C<br/>MediaProjection and H.264] -->|Offer over TCP 45456| Registry
+
+    subgraph Ubuntu[Ubuntu desktop]
+        Registry[Session registry<br/>maximum four devices]
+        P1[WebRTC peer A]
+        P2[WebRTC peer B]
+        P3[WebRTC peer C]
+        D1[H.264 depacketizer A]
+        D2[H.264 depacketizer B]
+        D3[H.264 depacketizer C]
+        W1[Player window A]
+        W2[Player window B]
+        W3[Player window C]
+
+        Registry --> P1 --> D1 --> W1
+        Registry --> P2 --> D2 --> W2
+        Registry --> P3 --> D3 --> W3
+    end
+
+    A ==>|DTLS-SRTP video| P1
+    B ==>|DTLS-SRTP video| P2
+    C ==>|DTLS-SRTP video| P3
+    Registry -.->|Stop command over data channel| A
+    Registry -.->|Stop command over data channel| B
+    Registry -.->|Stop command over data channel| C
+```
+
+Android captures at up to 30 fps with a 1280-pixel longest-side cap. Native
+Rust code terminates WebRTC, reconstructs complete Annex-B H.264 access units,
+and feeds an independent low-latency FFplay process for every session. The
+desktop caches SPS/PPS plus the current GOP so reopening a player does not wait
+on a new key frame or begin with missing frame references.
+
+The mirror is currently video-only and view-only. Phone audio and desktop
+keyboard/mouse control are not implemented. See
+[`docs/mirror-v3.md`](docs/mirror-v3.md) for signaling, session states, control
+messages, compatibility, and decoder behavior.
+
+## Build from source
+
+### Requirements
+
+- Rust stable toolchain
+- Java 17 for Android builds
+- Android SDK for the APK
+- Tauri 2 Linux development packages and FFmpeg for Ubuntu desktop builds
+
+Install the Ubuntu desktop requirements:
 
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev build-essential curl wget file \
+sudo apt install \
+  build-essential curl file wget \
+  libwebkit2gtk-4.1-dev libsoup-3.0-dev \
   libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
   ffmpeg
 ```
 
-The release `.deb` declares FFmpeg as a dependency. Install it separately before
-using mirroring from an `.AppImage`. The manual command above is only needed
-when running or building LanKuu from source.
-LanKuu terminates WebRTC in native Rust because Ubuntu's WebKit build does not
-expose `RTCPeerConnection`, and its embedded H.264 WebCodecs decoder is not
-reliable across Ubuntu builds. Each connected stream therefore opens in its own
-native low-latency FFplay window. The LanKuu page remains the multi-device
-session and stop-control panel.
+### Rust workspace and CLI
+
+```bash
+cargo test --workspace
+cargo build --release -p lankuu
+./target/release/lankuu --version
+```
+
+### Desktop application
 
 Run a development build:
 
@@ -77,96 +284,102 @@ Run a development build:
 cargo run -p lankuu-desktop
 ```
 
-Build the optimized desktop binary:
+Build the optimized executable:
 
 ```bash
 cargo build --release -p lankuu-desktop
 ```
 
-Inside the app, choose a discovered device (or enter its IP), then drop or pick
-files. Turn on **Ready to receive** to make the desktop discoverable. Received
-files are stored in `~/Downloads/LanKuu`.
-
-### Native screen mirroring
-
-1. Put the Android phones and desktop computer on the same trusted network.
-2. Open **Mirror** in the desktop app and select **Start mirror receiver**.
-3. Open **Cast** in the Android app, enter the Ubuntu IP shown on desktop, and
-   select **Start mirroring**.
-4. Accept Android's system screen-sharing prompt. Each device appears as a
-   low-latency video tile inside LanKuu and in its own player window. Repeat on
-   up to four phones.
-5. Stop one phone from its list item without interrupting the other sessions,
-   or turn off the receiver to stop every session.
-
-Each device has its own native player window. The Play action opens that
-device's player again after it was closed. LanKuu shows an in-card loading state
-while the native player starts, reports a real process failure, and keeps the
-main window in place while the always-on-top player appears above it. Use the
-Stop action beside a device to end only that device's mirroring session.
-The desktop preserves the current H.264 key-frame sequence when reopening a
-player, preventing a black wait for the next encoder key frame.
-
-Mirroring uses MediaProjection, hardware H.264 encoding, and a direct WebRTC
-peer connection. TCP port `45456` exchanges the one-time SDP offer/answer;
-WebRTC then chooses a direct dynamic UDP media path, encrypts video with
-DTLS-SRTP, and adapts bitrate using network feedback. The desktop's native Rust
-peer depacketizes complete H.264 frames and sends them to each native FFplay
-window. A WebRTC control channel lets the desktop stop an individual Android
-capture cleanly. The current MVP is view-only: it does not transmit audio or
-support desktop touch/keyboard control.
-
-## Android APK
-
-The Android MVP supports Android 10 and newer.
+### Android application
 
 ```bash
 cd android
+./gradlew lintDebug
 ./gradlew assembleDebug
 ```
 
-Install `app/build/outputs/apk/debug/app-debug.apk`, keep LanKuu open, and tap
-**Start receiving** before sending to the phone. To send, discover a receiving
-device or enter its local IP address.
+The APK is written to
+`android/app/build/outputs/apk/debug/app-debug.apk`.
 
-## Releases
+## Release automation
 
-Pushing a version tag runs `.github/workflows/release.yml`. The workflow first
-checks Rust formatting, core tests, and Android lint. It then creates native
-Ubuntu (`.deb` and `.AppImage`), Windows (`.exe`), macOS (`.dmg`), and Android
-(`.apk`) downloads. A draft release is published only after every platform
-build succeeds.
+Pushing a tag matching `v*` starts
+[`release.yml`](.github/workflows/release.yml).
 
-The current Android CI artifact is debug-signed so it can be installed for MVP
-testing. A stable production signing key is required before Play Store or
-production distribution.
+```mermaid
+flowchart LR
+    Tag[Push version tag] --> Verify[Format, Rust tests,<br/>Android lint]
+    Verify --> Draft[Create draft release]
+    Draft --> Ubuntu[Ubuntu<br/>DEB and AppImage]
+    Draft --> Windows[Windows<br/>NSIS installer]
+    Draft --> MacArm[macOS<br/>Apple Silicon DMG]
+    Draft --> MacIntel[macOS<br/>Intel DMG]
+    Draft --> APK[Android APK]
+    Ubuntu --> Publish[Publish release]
+    Windows --> Publish
+    MacArm --> Publish
+    MacIntel --> Publish
+    APK --> Publish
+```
+
+The release remains a draft unless every platform job succeeds.
 
 ## Repository layout
 
 ```text
-crates/lankuu-core/  Rust wire protocol and streaming helpers
-crates/lankuu-cli/   Ubuntu/Linux command-line app
-desktop/             Tauri desktop app and macOS-inspired interface
-android/             Kotlin Android application
-docs/protocol-v1.md  Cross-platform wire protocol
-docs/mirror-v3.md    Multi-session direct-LAN WebRTC mirroring protocol
+LanKuu/
+├── android/                 Kotlin Android application
+├── crates/
+│   ├── lankuu-core/        Shared Rust protocol and network helpers
+│   └── lankuu-cli/         Native command-line application
+├── desktop/
+│   ├── src-tauri/          Tauri commands and native WebRTC receiver
+│   └── ui/                 Dependency-free HTML, CSS, and JavaScript UI
+├── docs/
+│   ├── protocol-v1.md      File and text wire protocol
+│   └── mirror-v3.md        Multi-session WebRTC mirror protocol
+└── .github/workflows/      Verification and cross-platform releases
 ```
 
-## Current MVP limitations
+## Security and limitations
 
-- No encryption, device pairing, or receiver confirmation
-- No interrupted-transfer resume or content checksum yet
-- Mirroring is currently video-only and view-only
-- Mirroring signaling is LAN-only and is not authenticated until pairing lands
-- Android receives only while the app screen/process remains active
-- UDP discovery may be blocked by guest Wi-Fi or access-point isolation
-- The Android implementation mirrors the shared protocol in Kotlin; moving the
-  transfer engine into the Rust core through JNI is a later hardening step
+- File and text traffic has no encryption, authentication, pairing, or
+  receiver approval yet.
+- Mirror media is encrypted by WebRTC, but TCP signaling and device metadata
+  are not authenticated.
+- Interrupted transfers cannot resume and do not yet have an application-level
+  content checksum.
+- Android receives only while its app process remains active.
+- Mirroring has no audio or remote keyboard, mouse, or touch control.
+- Windows and macOS artifacts are produced by CI but still require broader
+  runtime and UX testing.
+- Android implements protocol v1 in Kotlin. Moving the transfer engine into the
+  shared Rust core through JNI is a future hardening step.
 
-## Next milestones
+Do not expose ports `45454`–`45456` to the public Internet.
 
-1. Pair devices with a short code and encrypt every transfer
-2. Add BLAKE3 verification, chunking, pause, and resume
-3. Move Android receiving to a user-visible foreground transfer service
-4. Add transfer progress, history, and Android share-sheet integration
-5. Harden Windows and macOS support, then add an iOS client
+## Roadmap
+
+1. Trusted-device pairing, receiver approval, and encrypted transfers
+2. Chunk verification, pause, retry, and interrupted-transfer resume
+3. Android foreground transfer service and share-sheet integration
+4. Mirror quality profiles, latency metrics, screenshots, and recording
+5. Audio forwarding and optional clipboard synchronization
+6. Production hardening for Windows and macOS, followed by iOS support
+
+## Contributing
+
+Issues and focused pull requests are welcome. Before submitting a change:
+
+```bash
+cargo fmt --all -- --check
+cargo test --workspace
+cd android && ./gradlew lintDebug
+```
+
+Protocol changes must preserve the compatibility rules documented under
+[`docs/`](docs/), or introduce an explicit new protocol version.
+
+## License
+
+LanKuu is available under the [MIT License](LICENSE).
