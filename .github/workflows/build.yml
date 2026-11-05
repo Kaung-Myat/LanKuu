@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LanKuu-0.5.0-Android
+          name: LanKuu-0.5.1-Android
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -50,7 +50,7 @@ jobs:
             os: ubuntu-22.04
             args: --bundles deb,appimage
             targets: ""
-            artifact: LanKuu-0.5.0-Ubuntu-x64
+            artifact: LanKuu-0.5.1-Ubuntu-x64
             files: |
               target/release/bundle/deb/*.deb
               target/release/bundle/appimage/*.AppImage
@@ -58,19 +58,19 @@ jobs:
             os: windows-latest
             args: --bundles nsis
             targets: ""
-            artifact: LanKuu-0.5.0-Windows-x64
+            artifact: LanKuu-0.5.1-Windows-x64
             files: target/release/bundle/nsis/*.exe
           - label: macOS Apple Silicon
             os: macos-latest
             args: --target aarch64-apple-darwin --bundles dmg
             targets: aarch64-apple-darwin
-            artifact: LanKuu-0.5.0-macOS-Apple-Silicon
+            artifact: LanKuu-0.5.1-macOS-Apple-Silicon
             files: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           - label: macOS Intel
             os: macos-latest
             args: --target x86_64-apple-darwin --bundles dmg
             targets: x86_64-apple-darwin
-            artifact: LanKuu-0.5.0-macOS-Intel
+            artifact: LanKuu-0.5.1-macOS-Intel
             files: target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
 
     steps:
