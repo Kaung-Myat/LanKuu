@@ -468,11 +468,16 @@ mod tests {
             let receiver_output = output.clone();
             let barrier = Arc::clone(&ready_to_publish);
             receivers.push(thread::spawn(move || {
-                receive_one(stream, &receiver_output, |_| {}, |copied, total| {
-                    if copied == total {
-                        barrier.wait();
-                    }
-                })
+                receive_one(
+                    stream,
+                    &receiver_output,
+                    |_| {},
+                    |copied, total| {
+                        if copied == total {
+                            barrier.wait();
+                        }
+                    },
+                )
             }));
             write_header(
                 &mut client,
