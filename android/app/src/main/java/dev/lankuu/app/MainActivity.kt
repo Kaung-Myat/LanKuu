@@ -318,7 +318,7 @@ class MainActivity : Activity() {
 
     private fun scanConnectionCode() {
         IntentIntegrator(this)
-            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE_TYPES)
+            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
             .setCaptureActivity(QrScannerActivity::class.java)
             .setPrompt(getString(R.string.scan_qr_prompt))
             .setBeepEnabled(false)
