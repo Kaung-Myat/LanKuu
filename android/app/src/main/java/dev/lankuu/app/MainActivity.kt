@@ -142,6 +142,15 @@ class MainActivity : Activity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_CAMERA_PERMISSION) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                launchQrScanner()
+            } else {
+                toast(getString(R.string.camera_permission_denied))
+                showStatus(getString(R.string.camera_permission_denied))
+            }
+            return
+        }
         if (requestCode != REQUEST_LOCAL_NETWORK_PERMISSION) return
         val action = pendingNetworkPermissionAction
         pendingNetworkPermissionAction = null
@@ -317,6 +326,19 @@ class MainActivity : Activity() {
     }
 
     private fun scanConnectionCode() {
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
+            toast(getString(R.string.camera_unavailable))
+            showStatus(getString(R.string.camera_unavailable))
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA_PERMISSION)
+            return
+        }
+        launchQrScanner()
+    }
+
+    private fun launchQrScanner() {
         IntentIntegrator(this)
             .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
             .setCaptureActivity(QrScannerActivity::class.java)
@@ -680,6 +702,7 @@ class MainActivity : Activity() {
         const val PICK_FILE = 1001
         const val REQUEST_SCREEN_CAPTURE = 1002
         const val REQUEST_LOCAL_NETWORK_PERMISSION = 1003
+        const val REQUEST_CAMERA_PERMISSION = 1004
         const val MAX_ACTIVITY_ITEMS = 12
         const val MAX_INBOX_ITEMS = 20
         const val TEXT_RECEIVED_PREFIX = "Text received:\n"

@@ -60,6 +60,8 @@
     <string name="connect_a_device">Connect a device</string>
     <string name="local_camera_note">The code is read on this phone only</string>
     <string name="close_scanner">Close scanner</string>
+    <string name="camera_permission_denied">Camera permission is required to scan the desktop QR code.</string>
+    <string name="camera_unavailable">No available camera was found. Enter the desktop address manually.</string>
     <string name="invalid_lankuu_qr">That isn’t a valid LanKuu connection code.</string>
     <string name="connected_to">Connected to %1$s</string>
     <string name="discover_short">Discover</string>
