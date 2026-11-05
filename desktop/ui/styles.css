@@ -62,7 +62,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   border-bottom: 1px solid var(--border); background: var(--surface);
 }
 .titlebar-brand { height: 100%; display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 650; }
-.app-mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: white; background: var(--accent); font-size: 13px; font-weight: 750; }
+.app-mark { display: block; width: 28px; height: 28px; border-radius: 7px; object-fit: cover; box-shadow: 0 2px 8px rgba(63, 33, 153, 0.22); }
 .titlebar-drag { height: 100%; }
 .privacy-status { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .privacy-status span { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
