@@ -1,0 +1,51 @@
+name: Publish v0.5.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-v0.5.0.yml"
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Tag and publish release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download 41984460976 --dir artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir release-assets
+          find artifacts -type f -exec cp '{}' release-assets/ ';'
+          mv release-assets/app-debug.apk release-assets/LanKuu_0.5.0_android.apk
+
+      - name: Publish v0.5.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## LanKuu 0.5.0
+
+          - Connect Android to LanKuu Desktop by scanning one QR code.
+          - Use the scanned destination for both file sharing and screen mirroring.
+          - New Android visual design, navigation, connection flow, and custom QR scanner.
+          - Collision-safe incoming file publication and safer CLI output.
+          - Installable builds for Android, Ubuntu, Windows, and macOS.
+
+          File and text transfers and connection QR codes are not authenticated yet. Use LanKuu on a trusted local network.
+          EOF
+          gh release create v0.5.0 \
+            --target "$GITHUB_SHA" \
+            --title "LanKuu v0.5.0" \
+            --notes-file release-notes.md \
+            release-assets/*
