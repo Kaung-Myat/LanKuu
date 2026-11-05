@@ -1,0 +1,42 @@
+name: Start v0.5.2 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-v0.5.2.yml"
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  start-release:
+    name: Create tag and start release build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create v0.5.2 draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.5.2 >/dev/null 2>&1 || \
+            gh release create v0.5.2 \
+              --target "$GITHUB_SHA" \
+              --title "LanKuu v0.5.2" \
+              --draft \
+              --generate-notes
+
+      - name: Push v0.5.2 tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa v0.5.2 -m "LanKuu v0.5.2"
+          git push --force origin v0.5.2
+
+      - name: Start the verified release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref v0.5.2
