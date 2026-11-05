@@ -166,7 +166,8 @@ addresses, output directories, ports, and single-transfer receiver mode.
 Every selected file is sent through an independent protocol v1 connection.
 The receiver streams the declared number of bytes into a temporary file,
 flushes it to disk, publishes it under a collision-safe name, and only then
-returns an acknowledgment.
+returns an acknowledgment. Desktop and CLI require a downloads filesystem that
+supports hard links for no-overwrite publication.
 
 ```mermaid
 sequenceDiagram
@@ -183,7 +184,7 @@ sequenceDiagram
         S->>R: Raw payload bytes
         R->>F: Append to temporary .part file
     end
-    R->>F: Flush, sync, and rename
+    R->>F: Flush, sync, and publish without overwriting
     R-->>S: OK or ER
 ```
 

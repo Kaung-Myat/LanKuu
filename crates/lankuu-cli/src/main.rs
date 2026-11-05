@@ -1,11 +1,11 @@
+use lankuu_core::network::{self, ReceivedPayload};
 use lankuu_core::{
-    copy_exact, read_header, unique_destination, write_header, Header, PayloadKind, ACK_ERROR,
-    ACK_OK, DEFAULT_TRANSFER_PORT, DISCOVERY_PORT, DISCOVERY_QUERY, DISCOVERY_RESPONSE_PREFIX,
-    MAX_TEXT_BYTES,
+    copy_exact, write_header, Header, PayloadKind, ACK_OK, DEFAULT_TRANSFER_PORT, DISCOVERY_PORT,
+    DISCOVERY_QUERY, DISCOVERY_RESPONSE_PREFIX, MAX_TEXT_BYTES,
 };
 use std::env;
 use std::fs::{self, File};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -127,69 +127,29 @@ fn receive_command(arguments: &[String]) -> AppResult<()> {
     Ok(())
 }
 
-fn receive_one(mut stream: TcpStream, output: &Path) -> AppResult<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-    let header = match read_header(&mut stream) {
-        Ok(header) => header,
-        Err(error) => {
-            let _ = stream.write_all(ACK_ERROR);
-            return Err(error.into());
+fn receive_one(stream: TcpStream, output: &Path) -> AppResult<()> {
+    match network::receive_one(stream, output, |_| {}, |_, _| {})? {
+        ReceivedPayload::Text { text, .. } => {
+            println!("\nText received:\n{}\n", terminal_safe(&text));
         }
-    };
-
-    let result: AppResult<()> = match header.kind {
-        PayloadKind::Text => {
-            if header.payload_len > MAX_TEXT_BYTES {
-                Err(format!("text payload is too large: {} bytes", header.payload_len).into())
-            } else {
-                let mut bytes = Vec::with_capacity(header.payload_len as usize);
-                copy_exact(&mut stream, &mut bytes, header.payload_len)?;
-                let text = String::from_utf8(bytes)?;
-                println!("\nText received:\n{text}\n");
-                Ok(())
-            }
-        }
-        PayloadKind::File => receive_file(&mut stream, output, &header),
-    };
-
-    match result {
-        Ok(()) => {
-            stream.write_all(ACK_OK)?;
-            stream.flush()?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = stream.write_all(ACK_ERROR);
-            Err(error)
+        ReceivedPayload::File { path, size, .. } => {
+            println!(
+                "Received {} ({size} bytes)",
+                terminal_safe(&path.to_string_lossy())
+            );
         }
     }
+    Ok(())
 }
 
-fn receive_file(stream: &mut TcpStream, output: &Path, header: &Header) -> AppResult<()> {
-    let destination = unique_destination(output, &header.name)?;
-    let temporary = destination.with_extension(format!(
-        "{}.part",
-        destination
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("lankuu")
-    ));
-
-    let receive_result = (|| -> AppResult<()> {
-        let file = File::create(&temporary)?;
-        let mut writer = BufWriter::with_capacity(1024 * 1024, file);
-        let received = copy_exact(stream, &mut writer, header.payload_len)?;
-        writer.flush()?;
-        writer.get_ref().sync_all()?;
-        fs::rename(&temporary, &destination)?;
-        println!("Received {} ({} bytes)", destination.display(), received);
-        Ok(())
-    })();
-
-    if receive_result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    receive_result
+fn terminal_safe(text: &str) -> String {
+    text.chars()
+        .map(|character| match character {
+            '\n' | '\t' => character,
+            character if character.is_control() => '\u{fffd}',
+            character => character,
+        })
+        .collect()
 }
 
 fn send_file_command(arguments: &[String]) -> AppResult<()> {
@@ -302,7 +262,7 @@ fn discover_command(arguments: &[String]) -> AppResult<()> {
                     let key = (source.ip(), port);
                     if !found.contains(&key) {
                         found.push(key);
-                        println!("{name}\t{}:{port}", source.ip());
+                        println!("{}\t{}:{port}", terminal_safe(name), source.ip());
                     }
                 }
             }

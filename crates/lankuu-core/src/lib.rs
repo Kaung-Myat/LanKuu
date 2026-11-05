@@ -141,6 +141,7 @@ pub fn safe_file_name(raw: &str) -> String {
         .chars()
         .map(|character| match character {
             '/' | '\\' => '_',
+            ':' if cfg!(windows) => '_',
             character if character.is_control() => '_',
             character => character,
         })
@@ -157,7 +158,7 @@ pub fn unique_destination(directory: &Path, requested_name: &str) -> io::Result<
     fs::create_dir_all(directory)?;
     let safe_name = safe_file_name(requested_name);
     let initial = directory.join(&safe_name);
-    if !initial.exists() {
+    if destination_is_available(&initial)? {
         return Ok(initial);
     }
 
@@ -174,12 +175,20 @@ pub fn unique_destination(directory: &Path, requested_name: &str) -> io::Result<
             None => format!("{stem} ({suffix})"),
         };
         let candidate = directory.join(candidate_name);
-        if !candidate.exists() {
+        if destination_is_available(&candidate)? {
             return Ok(candidate);
         }
     }
 
     unreachable!("the suffix space is practically unbounded")
+}
+
+fn destination_is_available(path: &Path) -> io::Result<bool> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]

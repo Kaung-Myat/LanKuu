@@ -4,12 +4,12 @@ use crate::{
 };
 use std::collections::HashSet;
 use std::fmt;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{IpAddr, Shutdown, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 use std::thread;
@@ -233,34 +233,53 @@ fn receive_file<F>(
 where
     F: FnMut(u64, u64),
 {
-    let destination = unique_destination(output, &header.name)?;
-    let temporary = destination.with_extension(format!(
-        "{}.part",
-        destination
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("lankuu")
-    ));
-
-    let receive_result = (|| -> NetworkResult<()> {
-        let file = File::create(&temporary)?;
+    fs::create_dir_all(output)?;
+    let (file, temporary) = create_partial_file(output)?;
+    let receive_result = (|| -> NetworkResult<PathBuf> {
         let mut writer = BufWriter::with_capacity(1024 * 1024, file);
         copy_exact_with_progress(stream, &mut writer, header.payload_len, progress)?;
         writer.flush()?;
         writer.get_ref().sync_all()?;
-        fs::rename(&temporary, &destination)?;
-        Ok(())
+        drop(writer);
+
+        loop {
+            let destination = unique_destination(output, &header.name)?;
+            match fs::hard_link(&temporary, &destination) {
+                Ok(()) => return Ok(destination),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
     })();
 
-    if receive_result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    receive_result?;
+    let _ = fs::remove_file(&temporary);
+    let destination = receive_result?;
     Ok(ReceivedPayload::File {
         path: destination,
         size: header.payload_len,
         peer,
     })
+}
+
+fn create_partial_file(output: &Path) -> io::Result<(File, PathBuf)> {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+    loop {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let path = output.join(format!(".lankuu-{}-{id}.part", std::process::id()));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub fn discover_devices(timeout: Duration) -> NetworkResult<Vec<DiscoveredDevice>> {
@@ -398,6 +417,7 @@ mod tests {
     use std::fs;
     use std::io::Cursor;
     use std::net::TcpListener;
+    use std::sync::Barrier;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -421,6 +441,74 @@ mod tests {
         assert_eq!(output, b"hello");
         assert_eq!(events.first(), Some(&(0, 5)));
         assert_eq!(events.last(), Some(&(5, 5)));
+    }
+
+    #[test]
+    fn concurrent_receives_keep_both_payloads() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let output =
+            std::env::temp_dir().join(format!("lankuu-collision-{}-{unique}", std::process::id()));
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("report.txt.part"), b"existing file").unwrap();
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let ready_to_publish = Arc::new(Barrier::new(2));
+        let mut receivers = Vec::new();
+        let mut clients = Vec::new();
+        for payload in [b"abc", b"xyz"] {
+            let mut client = TcpStream::connect(address).unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let (stream, _) = listener.accept().unwrap();
+            let receiver_output = output.clone();
+            let barrier = Arc::clone(&ready_to_publish);
+            receivers.push(thread::spawn(move || {
+                receive_one(stream, &receiver_output, |_| {}, |copied, total| {
+                    if copied == total {
+                        barrier.wait();
+                    }
+                })
+            }));
+            write_header(
+                &mut client,
+                &Header {
+                    kind: PayloadKind::File,
+                    name: "report.txt".to_owned(),
+                    payload_len: 3,
+                },
+            )
+            .unwrap();
+            client.write_all(payload).unwrap();
+            client.shutdown(Shutdown::Write).unwrap();
+            clients.push(client);
+        }
+
+        for mut client in clients {
+            let mut ack = [0; 2];
+            client.read_exact(&mut ack).unwrap();
+            assert_eq!(&ack, ACK_OK);
+        }
+        for receiver in receivers {
+            receiver.join().unwrap().unwrap();
+        }
+
+        let mut received = [
+            fs::read(output.join("report.txt")).unwrap(),
+            fs::read(output.join("report (1).txt")).unwrap(),
+        ];
+        received.sort();
+        assert_eq!(received, [b"abc".to_vec(), b"xyz".to_vec()]);
+        assert_eq!(
+            fs::read(output.join("report.txt.part")).unwrap(),
+            b"existing file"
+        );
+        assert_eq!(fs::read_dir(&output).unwrap().count(), 3);
+        fs::remove_dir_all(output).unwrap();
     }
 
     #[test]
