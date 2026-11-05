@@ -5,6 +5,7 @@ use lankuu_core::network::{
     send_text as send_text_over_lan, spawn_discovery_responder, ReceivedPayload,
 };
 use lankuu_core::{Header, PayloadKind, DEFAULT_TRANSFER_PORT};
+use qrcode::{render::svg, QrCode};
 use serde::Serialize;
 use std::fs;
 use std::net::{TcpListener, UdpSocket};
@@ -77,6 +78,17 @@ struct MirrorView {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ConnectionCodeView {
+    uri: String,
+    svg: String,
+    device_name: String,
+    address: String,
+    transfer_port: u16,
+    mirror_port: u16,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TransferEvent {
     id: u64,
     direction: &'static str,
@@ -104,6 +116,37 @@ async fn discover_devices() -> Result<Vec<DeviceView>, String> {
                 .collect()
         })
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn connection_code() -> Result<ConnectionCodeView, String> {
+    let address = local_network_address();
+    if address == "Your desktop IP" {
+        return Err("could not determine this desktop's local network address".to_owned());
+    }
+    let device_name = device_name();
+    let uri = format!(
+        "lankuu://connect?v=1&host={}&transfer={}&mirror={}&name={}",
+        percent_encode(&address),
+        DEFAULT_TRANSFER_PORT,
+        mirror::SIGNAL_PORT,
+        percent_encode(&device_name),
+    );
+    let code = QrCode::new(uri.as_bytes()).map_err(|error| error.to_string())?;
+    let svg = code
+        .render::<svg::Color>()
+        .min_dimensions(256, 256)
+        .dark_color(svg::Color("#19182A"))
+        .light_color(svg::Color("#FFFFFF"))
+        .build();
+    Ok(ConnectionCodeView {
+        uri,
+        svg,
+        device_name,
+        address,
+        transfer_port: DEFAULT_TRANSFER_PORT,
+        mirror_port: mirror::SIGNAL_PORT,
+    })
 }
 
 #[tauri::command]
@@ -711,6 +754,18 @@ fn device_name() -> String {
         .unwrap_or_else(|| "LanKuu Desktop".to_owned())
 }
 
+fn percent_encode(value: &str) -> String {
+    value.bytes().fold(String::new(), |mut encoded, byte| {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            use std::fmt::Write;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+        encoded
+    })
+}
+
 #[cfg(target_os = "linux")]
 fn ensure_mirror_runtime() -> Result<(), String> {
     let player_available = Command::new("ffplay")
@@ -745,6 +800,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            connection_code,
             discover_devices,
             send_text,
             send_files,

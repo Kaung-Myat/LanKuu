@@ -36,6 +36,7 @@ to an Ubuntu desktop at the same time. No account or cloud relay is required.
 - Direct LAN transfer with no account, cloud storage, or Internet connection
 - Streaming file I/O suitable for multi-gigabyte files
 - UTF-8 text sharing and ordered multi-file batches
+- One-scan QR connection for file sharing and screen mirroring
 - UDP discovery with manual IP connection as a fallback
 - Collision-safe file names and temporary files for incomplete transfers
 - Native Ubuntu CLI and a Tauri desktop interface
@@ -120,20 +121,25 @@ windows use `ffplay`. If you use the AppImage, install FFmpeg separately:
 sudo apt install ffmpeg
 ```
 
-Launch LanKuu, turn on **Ready to receive**, and select a nearby device or enter
-its IP address manually.
+Launch LanKuu and show the connection QR code. Turn on **Ready to receive** for
+files and text, or start the mirror receiver before casting.
 
 ### Android
 
 Install the release APK, allow Android to install the package when prompted,
 and open LanKuu. Use:
 
+- **Scan** to connect Share and Cast to a desktop without typing an IP address;
 - **Share** to send text or one or more files;
 - **Cast** to mirror the Android screen to a desktop;
 - **Inbox** and **Activity** to inspect received content and transfers.
 
 The current CI artifact is debug-signed for MVP testing. Production signing is
 required before Play Store distribution.
+
+The QR format is documented in
+[`docs/connection-qr-v1.md`](docs/connection-qr-v1.md). UDP discovery and manual
+address entry remain available when a camera is unavailable.
 
 ### Ubuntu CLI (source build)
 

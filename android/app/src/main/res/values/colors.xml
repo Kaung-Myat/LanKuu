@@ -1,19 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="app_background">#F4F6F7</color>
+    <color name="app_background">#F7F7FC</color>
     <color name="surface">#FFFFFFFF</color>
-    <color name="surface_subtle">#F8FAFA</color>
-    <color name="surface_pressed">#EDF2F2</color>
-    <color name="text_primary">#142022</color>
-    <color name="text_secondary">#627174</color>
-    <color name="text_tertiary">#869295</color>
-    <color name="accent">#087F7A</color>
-    <color name="accent_pressed">#066C68</color>
-    <color name="accent_soft">#E2F4F2</color>
-    <color name="accent_border">#A6DAD6</color>
-    <color name="divider">#E3E8E9</color>
-    <color name="border">#D5DDDE</color>
+    <color name="surface_subtle">#F3F2FA</color>
+    <color name="surface_pressed">#ECEAF7</color>
+    <color name="text_primary">#19182A</color>
+    <color name="text_secondary">#66647A</color>
+    <color name="text_tertiary">#9592A7</color>
+    <color name="accent">#6657D9</color>
+    <color name="accent_pressed">#5143BC</color>
+    <color name="accent_soft">#EEEAFE</color>
+    <color name="accent_border">#CFC7FA</color>
+    <color name="divider">#E8E6F0</color>
+    <color name="border">#DDD9E8</color>
     <color name="success">#1C9B69</color>
+    <color name="hero_start">#28243F</color>
+    <color name="hero_end">#413A6F</color>
+    <color name="hero_text">#FFFFFFFF</color>
+    <color name="hero_text_muted">#D5D0F0</color>
     <color name="white">#FFFFFFFF</color>
     <color name="transparent">#00000000</color>
 </resources>

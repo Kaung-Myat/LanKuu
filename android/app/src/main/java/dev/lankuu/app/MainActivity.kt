@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import com.google.zxing.integration.android.IntentIntegrator
 import java.text.DateFormat
 import java.util.Date
 import java.util.concurrent.ExecutorService
@@ -55,6 +56,8 @@ class MainActivity : Activity() {
     private lateinit var receiverCard: View
     private lateinit var selectedDevice: TextView
     private lateinit var discoverButton: Button
+    private lateinit var scanShareButton: Button
+    private lateinit var scanCastButton: Button
     private lateinit var sendTextButton: Button
     private lateinit var sendFileButton: Button
     private lateinit var deviceList: LinearLayout
@@ -68,6 +71,7 @@ class MainActivity : Activity() {
     private var mirrorReceiverRegistered = false
     private var pendingMirrorEndpoint: MirrorEndpoint? = null
     private var pendingNetworkPermissionAction: NetworkPermissionAction? = null
+    private var selectedConnection: LanKuuConnection? = null
     private val mirrorStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val running = intent?.getBooleanExtra(ScreenCastService.EXTRA_RUNNING, false) ?: false
@@ -109,6 +113,11 @@ class MainActivity : Activity() {
     @Deprecated("Kept for a dependency-free MVP file picker")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        val scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
+        if (scanResult != null) {
+            scanResult.contents?.let(::handleConnectionCode)
+            return
+        }
         when (requestCode) {
             PICK_FILE -> if (resultCode == RESULT_OK && data != null) {
                 val uris = selectedFileUris(data)
@@ -185,6 +194,8 @@ class MainActivity : Activity() {
         receiverCard = findViewById(R.id.receiver_card)
         selectedDevice = findViewById(R.id.selected_device)
         discoverButton = findViewById(R.id.discover_devices)
+        scanShareButton = findViewById(R.id.scan_share_qr)
+        scanCastButton = findViewById(R.id.scan_cast_qr)
         sendTextButton = findViewById(R.id.send_text)
         sendFileButton = findViewById(R.id.send_file)
         deviceList = findViewById(R.id.device_list)
@@ -201,6 +212,8 @@ class MainActivity : Activity() {
         navActivity.setOnClickListener { showScreen(Screen.ACTIVITY) }
         findViewById<View>(R.id.clear_inbox).setOnClickListener { clearInbox() }
         discoverButton.setOnClickListener { discoverDevices() }
+        scanShareButton.setOnClickListener { scanConnectionCode() }
+        scanCastButton.setOnClickListener { scanConnectionCode() }
         sendTextButton.setOnClickListener { sendText() }
         sendFileButton.setOnClickListener { chooseFiles() }
         castButton.setOnClickListener {
@@ -294,9 +307,46 @@ class MainActivity : Activity() {
     }
 
     private fun selectDevice(device: LanKuuDiscovery.Device) {
-        peerHost.setText(device.host)
-        castHost.setText(device.host)
-        selectedDevice.text = getString(R.string.selected_device_format, device.name, device.host)
+        selectConnection(
+            LanKuuConnection(
+                host = device.host,
+                transferPort = device.port,
+                name = device.name,
+            ),
+        )
+    }
+
+    private fun scanConnectionCode() {
+        IntentIntegrator(this)
+            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE_TYPES)
+            .setCaptureActivity(QrScannerActivity::class.java)
+            .setPrompt(getString(R.string.scan_qr_prompt))
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+            .initiateScan()
+    }
+
+    private fun handleConnectionCode(contents: String) {
+        val connection = LanKuuConnection.fromQr(contents)
+        if (connection == null) {
+            toast(getString(R.string.invalid_lankuu_qr))
+            showStatus(getString(R.string.invalid_lankuu_qr))
+            return
+        }
+        selectConnection(connection)
+        toast(getString(R.string.connected_to, connection.name))
+        showStatus(getString(R.string.connected_to, connection.name))
+    }
+
+    private fun selectConnection(connection: LanKuuConnection) {
+        selectedConnection = connection
+        peerHost.setText(connection.host)
+        castHost.setText(connection.mirrorAddress)
+        selectedDevice.text = getString(
+            R.string.selected_device_format,
+            connection.name,
+            connection.host,
+        )
         selectedDevice.setTextColor(getColor(R.color.text_primary))
     }
 
@@ -380,7 +430,8 @@ class MainActivity : Activity() {
     }
 
     private fun sendText() {
-        val host = validatedHost() ?: return
+        val destination = validatedConnection() ?: return
+        val host = destination.host
         val text = message.text.toString().trim()
         if (text.isEmpty()) {
             showStatus(getString(R.string.enter_text))
@@ -390,7 +441,9 @@ class MainActivity : Activity() {
         setSending(true)
         showStatus(getString(R.string.sending_text, host))
         worker.execute {
-            runCatching { LanKuuSender(contentResolver).sendText(host, text) }
+            runCatching {
+                LanKuuSender(contentResolver).sendText(host, destination.transferPort, text)
+            }
                 .onSuccess {
                     runOnUiThread {
                         message.text.clear()
@@ -408,7 +461,7 @@ class MainActivity : Activity() {
     }
 
     private fun chooseFiles() {
-        if (validatedHost() == null) return
+        if (validatedConnection() == null) return
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
@@ -442,12 +495,17 @@ class MainActivity : Activity() {
     }
 
     private fun sendFiles(uris: List<Uri>) {
-        val host = validatedHost() ?: return
+        val destination = validatedConnection() ?: return
+        val host = destination.host
         setSending(true)
         showStatus(getString(R.string.preparing_files, uris.size, host), addToActivity = false)
         worker.execute {
             runCatching {
-                LanKuuSender(contentResolver).sendFiles(host, uris) { index, total, name ->
+                LanKuuSender(contentResolver).sendFiles(
+                    host,
+                    destination.transferPort,
+                    uris,
+                ) { index, total, name ->
                     showStatus(
                         getString(R.string.sending_file_progress, index, total, name, host),
                         addToActivity = false,
@@ -521,16 +579,20 @@ class MainActivity : Activity() {
         receiverCard.setBackgroundResource(R.drawable.bg_receiver_active)
     }
 
-    private fun validatedHost(): String? {
+    private fun validatedConnection(): LanKuuConnection? {
         val host = peerHost.text.toString().trim()
         if (host.isEmpty()) {
             showStatus(getString(R.string.enter_peer_ip))
             peerHost.requestFocus()
             return null
         }
+        val current = selectedConnection
+        if (current != null && current.host == host) return current
+        val connection = LanKuuConnection(host = host, name = getString(R.string.manual_device))
+        selectedConnection = connection
         selectedDevice.text = getString(R.string.manual_destination, host)
         selectedDevice.setTextColor(getColor(R.color.text_primary))
-        return host
+        return connection
     }
 
     private fun showStatus(text: String, addToActivity: Boolean = true) {

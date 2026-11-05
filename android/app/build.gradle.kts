@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation("io.github.webrtc-sdk:android:150.7871.01")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }
 
 android {

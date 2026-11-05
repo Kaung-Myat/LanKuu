@@ -59,6 +59,9 @@ const elements = {
   mirrorSessionList: document.querySelector("#mirror-session-list"),
   mirrorSessionCount: document.querySelector("#mirror-session-count"),
   mirrorGridView: document.querySelector("#mirror-grid-view"),
+  shareConnectionQr: document.querySelector("#share-connection-qr"),
+  mirrorConnectionQr: document.querySelector("#mirror-connection-qr"),
+  connectionAddress: document.querySelector("#connection-address"),
   inboxBadge: document.querySelector("#inbox-badge"),
   inboxMessageCount: document.querySelector("#inbox-message-count"),
   inboxMessageLabel: document.querySelector("#inbox-message-label"),
@@ -81,6 +84,35 @@ function showToast(message) {
 function reportActionError(action, error) {
   console.error(`${action} failed`, error);
   showToast(`${action} failed: ${error}`);
+}
+
+function renderConnectionQr(target, svgText) {
+  const documentValue = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  const svg = documentValue.documentElement;
+  if (svg.nodeName.toLowerCase() !== "svg" || documentValue.querySelector("parsererror")) {
+    throw new Error("Desktop returned an invalid connection code");
+  }
+  target.replaceChildren(document.importNode(svg, true));
+}
+
+async function loadConnectionCode() {
+  if (!isTauri) {
+    elements.shareConnectionQr.textContent = "QR preview";
+    elements.mirrorConnectionQr.textContent = "QR preview";
+    elements.connectionAddress.textContent = "Available in LanKuu Desktop";
+    return;
+  }
+  try {
+    const connection = await invoke("connection_code");
+    renderConnectionQr(elements.shareConnectionQr, connection.svg);
+    renderConnectionQr(elements.mirrorConnectionQr, connection.svg);
+    elements.connectionAddress.textContent = `${connection.deviceName} · ${connection.address}`;
+  } catch (error) {
+    elements.shareConnectionQr.textContent = "QR unavailable";
+    elements.mirrorConnectionQr.textContent = "QR unavailable";
+    elements.connectionAddress.textContent = String(error);
+    console.error("Could not create connection code", error);
+  }
 }
 
 function initials(name) {
@@ -836,6 +868,7 @@ async function initialize() {
       showToast(`Could not read receiver status: ${error}`);
     }
   }
+  await loadConnectionCode();
   try {
     await discoverDevices();
   } catch (error) {

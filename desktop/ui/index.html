@@ -51,6 +51,11 @@
                 <button id="use-manual-host" aria-label="Use this address" title="Connect">→</button>
               </div>
             </label>
+            <div class="sidebar-qr-card">
+              <div class="sidebar-qr-copy"><strong>Connect phone</strong><small>Scan once for Share and Mirror</small></div>
+              <div class="sidebar-qr" id="share-connection-qr" aria-label="LanKuu connection QR code"></div>
+              <small class="connection-address" id="connection-address">Finding this desktop…</small>
+            </div>
           </div>
 
           <div class="sidebar-actions">
@@ -131,10 +136,14 @@
               </section>
 
               <section class="card mirror-guide-card">
-                <div class="card-header"><div><h2>Connect your phone</h2><p>Three quick steps</p></div><span class="latency-badge">Low latency</span></div>
+                <div class="card-header"><div><h2>Connect your phone</h2><p>Scan from LanKuu mobile</p></div><span class="latency-badge">Low latency</span></div>
+                <div class="mirror-qr-row">
+                  <div class="mirror-qr" id="mirror-connection-qr" aria-label="LanKuu connection QR code"></div>
+                  <div><strong>Scan this code</strong><p>It fills the local address and ports on your phone. Both devices must be on the same Wi-Fi.</p></div>
+                </div>
                 <ol class="mirror-steps">
                   <li><span>1</span><div><strong>Start the receiver</strong><p>LanKuu waits securely for your phone on this network.</p></div></li>
-                  <li><span>2</span><div><strong>Open Cast on Android</strong><p>Enter the desktop IP address shown here.</p></div></li>
+                  <li><span>2</span><div><strong>Scan from Android</strong><p>Open Cast and tap Scan desktop QR code.</p></div></li>
                   <li><span>3</span><div><strong>Allow screen sharing</strong><p>Tap Start mirroring and approve Android's prompt.</p></div></li>
                 </ol>
                 <div class="mirror-note"><strong>Adaptive, encrypted video</strong><p>WebRTC handles congestion and packet loss automatically. Touch control and phone audio are not included yet.</p></div>

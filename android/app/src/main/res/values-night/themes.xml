@@ -11,4 +11,13 @@
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowBackground">@color/app_background</item>
     </style>
+
+    <style name="Theme.LanKuu.Scanner" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:statusBarColor">#0C0B13</item>
+        <item name="android:navigationBarColor">#0C0B13</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
 </resources>
