@@ -2091,18 +2091,18 @@ dependencies = [
 
 [[package]]
 name = "lankuu"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "lankuu-core",
 ]
 
 [[package]]
 name = "lankuu-core"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "lankuu-desktop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
  "lankuu-core",
