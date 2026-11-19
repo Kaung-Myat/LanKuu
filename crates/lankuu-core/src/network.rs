@@ -23,6 +23,7 @@ pub enum NetworkError {
     Protocol(ProtocolError),
     InvalidUtf8(std::string::FromUtf8Error),
     InvalidInput(String),
+    Unauthorized,
     Rejected,
 }
 
@@ -33,6 +34,7 @@ impl fmt::Display for NetworkError {
             Self::Protocol(error) => write!(formatter, "protocol error: {error}"),
             Self::InvalidUtf8(_) => write!(formatter, "received text is not valid UTF-8"),
             Self::InvalidInput(message) => formatter.write_str(message),
+            Self::Unauthorized => formatter.write_str("this device has not been paired"),
             Self::Rejected => formatter.write_str("receiver rejected the transfer"),
         }
     }
@@ -44,7 +46,7 @@ impl std::error::Error for NetworkError {
             Self::Io(error) => Some(error),
             Self::Protocol(error) => Some(error),
             Self::InvalidUtf8(error) => Some(error),
-            Self::InvalidInput(_) | Self::Rejected => None,
+            Self::InvalidInput(_) | Self::Rejected | Self::Unauthorized => None,
         }
     }
 }
@@ -87,7 +89,13 @@ pub enum ReceivedPayload {
     },
 }
 
-pub fn send_text<F>(host: &str, port: u16, text: &str, progress: F) -> NetworkResult<()>
+pub fn send_text<F>(
+    host: &str,
+    port: u16,
+    pairing_token: &str,
+    text: &str,
+    progress: F,
+) -> NetworkResult<()>
 where
     F: FnMut(u64, u64),
 {
@@ -101,11 +109,18 @@ where
         kind: PayloadKind::Text,
         name: "message.txt".to_owned(),
         payload_len: text.len() as u64,
+        pairing_token: pairing_token.to_owned(),
     };
     send_payload(host, port, &header, &mut text.as_bytes(), progress)
 }
 
-pub fn send_file<F>(host: &str, port: u16, path: &Path, progress: F) -> NetworkResult<u64>
+pub fn send_file<F>(
+    host: &str,
+    port: u16,
+    pairing_token: &str,
+    path: &Path,
+    progress: F,
+) -> NetworkResult<u64>
 where
     F: FnMut(u64, u64),
 {
@@ -125,6 +140,7 @@ where
         kind: PayloadKind::File,
         name,
         payload_len: metadata.len(),
+        pairing_token: pairing_token.to_owned(),
     };
     let file = File::open(path)?;
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
@@ -163,6 +179,7 @@ where
 pub fn receive_one<S, P>(
     mut stream: TcpStream,
     output: &Path,
+    expected_pairing_token: &str,
     mut started: S,
     progress: P,
 ) -> NetworkResult<ReceivedPayload>
@@ -180,6 +197,10 @@ where
             return Err(error.into());
         }
     };
+    if header.pairing_token != expected_pairing_token {
+        let _ = stream.write_all(ACK_ERROR);
+        return Err(NetworkError::Unauthorized);
+    }
     started(&header);
 
     let result = match header.kind {
@@ -471,6 +492,7 @@ mod tests {
                 receive_one(
                     stream,
                     &receiver_output,
+                    "test-pairing-token",
                     |_| {},
                     |copied, total| {
                         if copied == total {
@@ -485,6 +507,7 @@ mod tests {
                     kind: PayloadKind::File,
                     name: "report.txt".to_owned(),
                     payload_len: 3,
+                    pairing_token: "test-pairing-token".to_owned(),
                 },
             )
             .unwrap();
@@ -540,15 +563,32 @@ mod tests {
             let mut received = Vec::new();
             for _ in 0..2 {
                 let (stream, _) = listener.accept().unwrap();
-                received.push(receive_one(stream, &receiver_output, |_| {}, |_, _| {}).unwrap());
+                received.push(
+                    receive_one(
+                        stream,
+                        &receiver_output,
+                        "test-pairing-token",
+                        |_| {},
+                        |_, _| {},
+                    )
+                    .unwrap(),
+                );
             }
             received
         });
 
-        send_file(&address.ip().to_string(), address.port(), &first, |_, _| {}).unwrap();
         send_file(
             &address.ip().to_string(),
             address.port(),
+            "test-pairing-token",
+            &first,
+            |_, _| {},
+        )
+        .unwrap();
+        send_file(
+            &address.ip().to_string(),
+            address.port(),
+            "test-pairing-token",
             &second,
             |_, _| {},
         )

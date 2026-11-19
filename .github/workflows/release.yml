@@ -89,18 +89,18 @@ jobs:
         include:
           - label: Ubuntu x64
             platform: ubuntu-22.04
-            args: --bundles deb,appimage
+            args: --bundles deb
             rust-targets: ""
           - label: Windows x64
             platform: windows-latest
             args: --bundles nsis
             rust-targets: ""
           - label: macOS Apple Silicon
-            platform: macos-latest
+            platform: macos-15
             args: --target aarch64-apple-darwin --bundles dmg
             rust-targets: aarch64-apple-darwin
           - label: macOS Intel
-            platform: macos-latest
+            platform: macos-15-intel
             args: --target x86_64-apple-darwin --bundles dmg
             rust-targets: x86_64-apple-darwin
 
@@ -125,6 +125,16 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad gstreamer1.0-libav
+
+      - name: Install native macOS mirror runtime source
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg@8
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+
+      - name: Bundle and smoke-test mirror player
+        shell: bash
+        run: python3 scripts/fetch-mirror-player.py
 
       - name: Build and upload desktop bundle
         uses: tauri-apps/tauri-action@v1

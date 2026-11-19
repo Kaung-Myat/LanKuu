@@ -33,7 +33,6 @@ class MainActivity : Activity() {
     private enum class NetworkPermissionAction { RECEIVE, MIRROR }
 
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
-    private lateinit var receiver: LanKuuReceiver
     private lateinit var shareScreen: View
     private lateinit var castScreen: View
     private lateinit var inboxScreen: View
@@ -57,7 +56,7 @@ class MainActivity : Activity() {
     private lateinit var selectedDevice: TextView
     private lateinit var discoverButton: Button
     private lateinit var scanShareButton: Button
-    private lateinit var scanCastButton: Button
+    private lateinit var scanCastButton: View
     private lateinit var sendTextButton: Button
     private lateinit var sendFileButton: Button
     private lateinit var deviceList: LinearLayout
@@ -69,6 +68,7 @@ class MainActivity : Activity() {
     private var activeScreen = Screen.SHARE
     private var unreadItems = 0
     private var mirrorReceiverRegistered = false
+    private var receiverEventRegistered = false
     private var pendingMirrorEndpoint: MirrorEndpoint? = null
     private var pendingNetworkPermissionAction: NetworkPermissionAction? = null
     private var selectedConnection: LanKuuConnection? = null
@@ -79,20 +79,26 @@ class MainActivity : Activity() {
             updateMirrorUi(running, error)
         }
     }
+    private val receiverEventReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.getStringExtra(FileReceiveService.EXTRA_MESSAGE)?.let(::showStatus)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         bindViews()
-        receiver = LanKuuReceiver(this, ::showStatus)
         bindActions()
         showScreen(Screen.SHARE)
         showStatus(getString(R.string.ready_trusted_network), addToActivity = false)
+        if (FileReceiveService.active) setReceiverReadyUi()
     }
 
     override fun onStart() {
         super.onStart()
         registerMirrorReceiver()
+        registerReceiverEventReceiver()
         updateMirrorUi(ScreenCastService.active, null)
     }
 
@@ -101,11 +107,14 @@ class MainActivity : Activity() {
             unregisterReceiver(mirrorStateReceiver)
             mirrorReceiverRegistered = false
         }
+        if (receiverEventRegistered) {
+            unregisterReceiver(receiverEventReceiver)
+            receiverEventRegistered = false
+        }
         super.onStop()
     }
 
     override fun onDestroy() {
-        receiver.stop()
         worker.shutdownNow()
         super.onDestroy()
     }
@@ -256,6 +265,13 @@ class MainActivity : Activity() {
         navCast.isSelected = screen == Screen.CAST
         navInbox.isSelected = screen == Screen.INBOX
         navActivity.isSelected = screen == Screen.ACTIVITY
+        listOf(navShare, navCast, navInbox, navActivity).forEach { item ->
+            item.animate()
+                .scaleX(if (item.isSelected) 1.06f else 1f)
+                .scaleY(if (item.isSelected) 1.06f else 1f)
+                .setDuration(160L)
+                .start()
+        }
         if (screen == Screen.INBOX) {
             unreadItems = 0
             updateInboxBadge()
@@ -267,7 +283,7 @@ class MainActivity : Activity() {
         discoverButton.text = getString(R.string.searching)
         showStatus(getString(R.string.searching_local_network))
         worker.execute {
-            runCatching { LanKuuDiscovery.discover() }
+            runCatching { LanKuuDiscovery.discover(this) }
                 .onSuccess { devices ->
                     runOnUiThread {
                         discoverButton.isEnabled = true
@@ -339,13 +355,7 @@ class MainActivity : Activity() {
     }
 
     private fun launchQrScanner() {
-        IntentIntegrator(this)
-            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-            .setCaptureActivity(QrScannerActivity::class.java)
-            .setPrompt(getString(R.string.scan_qr_prompt))
-            .setBeepEnabled(false)
-            .setOrientationLocked(false)
-            .initiateScan()
+        startActivityForResult(Intent(this, QrScannerActivity::class.java), IntentIntegrator.REQUEST_CODE)
     }
 
     private fun handleConnectionCode(contents: String) {
@@ -356,6 +366,7 @@ class MainActivity : Activity() {
             return
         }
         selectConnection(connection)
+        PairingStore.save(this, connection.pairingToken!!)
         toast(getString(R.string.connected_to, connection.name))
         showStatus(getString(R.string.connected_to, connection.name))
     }
@@ -374,8 +385,26 @@ class MainActivity : Activity() {
 
     private fun registerMirrorReceiver() {
         val filter = IntentFilter(ScreenCastService.ACTION_STATE)
-        registerReceiver(mirrorStateReceiver, filter, RECEIVER_NOT_EXPORTED)
+        registerNotExportedReceiver(mirrorStateReceiver, filter)
         mirrorReceiverRegistered = true
+    }
+
+    private fun registerReceiverEventReceiver() {
+        if (receiverEventRegistered) return
+        registerNotExportedReceiver(
+            receiverEventReceiver,
+            IntentFilter(FileReceiveService.ACTION_EVENT),
+        )
+        receiverEventRegistered = true
+    }
+
+    private fun registerNotExportedReceiver(receiver: BroadcastReceiver, filter: IntentFilter) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(receiver, filter)
+        }
     }
 
     private fun requestScreenCapture() {
@@ -385,7 +414,15 @@ class MainActivity : Activity() {
             toast(getString(R.string.mirror_invalid_address))
             return
         }
-        pendingMirrorEndpoint = endpoint
+        val pairingToken = selectedConnection
+            ?.takeIf { it.host == endpoint.host }
+            ?.pairingToken
+        if (pairingToken == null) {
+            showStatus(getString(R.string.scan_pairing_required))
+            toast(getString(R.string.scan_pairing_required))
+            return
+        }
+        pendingMirrorEndpoint = endpoint.copy(pairingToken = pairingToken)
         if (requestLocalNetworkPermission(NetworkPermissionAction.MIRROR)) return
         launchScreenCapturePrompt()
     }
@@ -420,6 +457,7 @@ class MainActivity : Activity() {
         val serviceIntent = Intent(this, ScreenCastService::class.java).apply {
             putExtra(ScreenCastService.EXTRA_HOST, endpoint.host)
             putExtra(ScreenCastService.EXTRA_PORT, endpoint.port)
+            putExtra(ScreenCastService.EXTRA_PAIRING_TOKEN, endpoint.pairingToken)
             putExtra(ScreenCastService.EXTRA_RESULT_CODE, resultCode)
             putExtra(ScreenCastService.EXTRA_RESULT_DATA, resultData)
         }
@@ -464,7 +502,12 @@ class MainActivity : Activity() {
         showStatus(getString(R.string.sending_text, host))
         worker.execute {
             runCatching {
-                LanKuuSender(contentResolver).sendText(host, destination.transferPort, text)
+                LanKuuSender(contentResolver).sendText(
+                    host,
+                    destination.transferPort,
+                    destination.pairingToken!!,
+                    text,
+                )
             }
                 .onSuccess {
                     runOnUiThread {
@@ -526,6 +569,7 @@ class MainActivity : Activity() {
                 LanKuuSender(contentResolver).sendFiles(
                     host,
                     destination.transferPort,
+                    destination.pairingToken!!,
                     uris,
                 ) { index, total, name ->
                     showStatus(
@@ -572,10 +616,10 @@ class MainActivity : Activity() {
     private fun setReceiverRunning(shouldRun: Boolean) {
         if (shouldRun) {
             setReceiverStartingUi(getString(R.string.starting_receiver))
-            receiver.start()
+            startForegroundService(Intent(this, FileReceiveService::class.java).setAction(FileReceiveService.ACTION_START))
             showStatus(getString(R.string.starting_receiver))
         } else {
-            receiver.stop()
+            startService(Intent(this, FileReceiveService::class.java).setAction(FileReceiveService.ACTION_STOP))
             receiverToggle.isEnabled = true
             receiverTitle.text = getString(R.string.not_receiving)
             receiverCaption.text = getString(R.string.turn_on_receiver)
@@ -609,12 +653,11 @@ class MainActivity : Activity() {
             return null
         }
         val current = selectedConnection
-        if (current != null && current.host == host) return current
-        val connection = LanKuuConnection(host = host, name = getString(R.string.manual_device))
-        selectedConnection = connection
-        selectedDevice.text = getString(R.string.manual_destination, host)
-        selectedDevice.setTextColor(getColor(R.color.text_primary))
-        return connection
+        if (current != null && current.host == host && current.pairingToken != null) return current
+        showStatus(getString(R.string.scan_pairing_required))
+        toast(getString(R.string.scan_pairing_required))
+        scanShareButton.requestFocus()
+        return null
     }
 
     private fun showStatus(text: String, addToActivity: Boolean = true) {

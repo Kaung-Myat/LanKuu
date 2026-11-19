@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 
 pub mod network;
 
-pub const MAGIC: &[u8; 8] = b"LANKUU01";
+pub const MAGIC: &[u8; 8] = b"LANKUU02";
 pub const DEFAULT_TRANSFER_PORT: u16 = 45_454;
 pub const DISCOVERY_PORT: u16 = 45_455;
 pub const DISCOVERY_QUERY: &[u8] = b"LANKUU_DISCOVER_V1";
 pub const DISCOVERY_RESPONSE_PREFIX: &str = "LANKUU_HERE_V1";
 pub const MAX_NAME_BYTES: usize = 1_024;
+pub const MAX_PAIRING_TOKEN_BYTES: usize = 128;
 pub const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
 pub const ACK_OK: &[u8; 2] = b"OK";
 pub const ACK_ERROR: &[u8; 2] = b"ER";
@@ -39,6 +40,7 @@ pub struct Header {
     pub kind: PayloadKind,
     pub name: String,
     pub payload_len: u64,
+    pub pairing_token: String,
 }
 
 #[derive(Debug)]
@@ -47,6 +49,7 @@ pub enum ProtocolError {
     InvalidMagic,
     InvalidKind(u8),
     InvalidNameLength(usize),
+    InvalidPairingTokenLength(usize),
     InvalidUtf8,
 }
 
@@ -58,6 +61,9 @@ impl fmt::Display for ProtocolError {
             Self::InvalidKind(kind) => write!(formatter, "unsupported payload kind: {kind}"),
             Self::InvalidNameLength(length) => {
                 write!(formatter, "invalid name length: {length} bytes")
+            }
+            Self::InvalidPairingTokenLength(length) => {
+                write!(formatter, "invalid pairing token length: {length} bytes")
             }
             Self::InvalidUtf8 => write!(formatter, "payload name is not valid UTF-8"),
         }
@@ -74,15 +80,26 @@ impl From<io::Error> for ProtocolError {
 
 pub fn write_header<W: Write>(writer: &mut W, header: &Header) -> Result<(), ProtocolError> {
     let name = header.name.as_bytes();
+    let pairing_token = header.pairing_token.as_bytes();
     if name.is_empty() || name.len() > MAX_NAME_BYTES || name.len() > u16::MAX as usize {
         return Err(ProtocolError::InvalidNameLength(name.len()));
+    }
+    if pairing_token.is_empty()
+        || pairing_token.len() > MAX_PAIRING_TOKEN_BYTES
+        || pairing_token.len() > u16::MAX as usize
+    {
+        return Err(ProtocolError::InvalidPairingTokenLength(
+            pairing_token.len(),
+        ));
     }
 
     writer.write_all(MAGIC)?;
     writer.write_all(&[header.kind as u8])?;
     writer.write_all(&(name.len() as u16).to_be_bytes())?;
     writer.write_all(&header.payload_len.to_be_bytes())?;
+    writer.write_all(&(pairing_token.len() as u16).to_be_bytes())?;
     writer.write_all(name)?;
+    writer.write_all(pairing_token)?;
     Ok(())
 }
 
@@ -108,14 +125,26 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<Header, ProtocolError> {
     reader.read_exact(&mut payload_len)?;
     let payload_len = u64::from_be_bytes(payload_len);
 
+    let mut token_len = [0_u8; 2];
+    reader.read_exact(&mut token_len)?;
+    let token_len = u16::from_be_bytes(token_len) as usize;
+    if token_len == 0 || token_len > MAX_PAIRING_TOKEN_BYTES {
+        return Err(ProtocolError::InvalidPairingTokenLength(token_len));
+    }
+
     let mut name = vec![0_u8; name_len];
     reader.read_exact(&mut name)?;
     let name = String::from_utf8(name).map_err(|_| ProtocolError::InvalidUtf8)?;
+
+    let mut pairing_token = vec![0_u8; token_len];
+    reader.read_exact(&mut pairing_token)?;
+    let pairing_token = String::from_utf8(pairing_token).map_err(|_| ProtocolError::InvalidUtf8)?;
 
     Ok(Header {
         kind,
         name,
         payload_len,
+        pairing_token,
     })
 }
 
@@ -202,6 +231,7 @@ mod tests {
             kind: PayloadKind::File,
             name: "မြန်မာ.txt".to_owned(),
             payload_len: 4_294_967_296,
+            pairing_token: "test-pairing-token".to_owned(),
         };
         let mut bytes = Vec::new();
 

@@ -19,26 +19,32 @@ internal class LanKuuSender(private val resolver: ContentResolver) {
         val failures: List<FileFailure>,
     )
 
-    fun sendText(host: String, port: Int, text: String) {
+    fun sendText(host: String, port: Int, pairingToken: String, text: String) {
         val bytes = text.toByteArray(Charsets.UTF_8)
         require(bytes.size.toLong() <= LanKuuProtocol.maxTextBytes) { "Text is too large" }
         bytes.inputStream().use { input ->
             send(
                 host,
                 port,
-                LanKuuProtocol.Header(LanKuuProtocol.Kind.TEXT, "message.txt", bytes.size.toLong()),
+                LanKuuProtocol.Header(
+                    LanKuuProtocol.Kind.TEXT,
+                    "message.txt",
+                    bytes.size.toLong(),
+                    pairingToken,
+                ),
                 input,
             )
         }
     }
 
-    fun sendFile(host: String, port: Int, uri: Uri): String {
-        return sendFile(host, port, uri, fileDetails(uri))
+    fun sendFile(host: String, port: Int, pairingToken: String, uri: Uri): String {
+        return sendFile(host, port, pairingToken, uri, fileDetails(uri))
     }
 
     fun sendFiles(
         host: String,
         port: Int,
+        pairingToken: String,
         uris: List<Uri>,
         onFileStarting: (index: Int, total: Int, name: String) -> Unit,
     ): BatchResult {
@@ -52,7 +58,7 @@ internal class LanKuuSender(private val resolver: ContentResolver) {
                 ?: LanKuuProtocol.safeFileName(uri.lastPathSegment ?: "selected-file")
             onFileStarting(index + 1, uris.size, name)
             details
-                .mapCatching { sendFile(host, port, uri, it) }
+                .mapCatching { sendFile(host, port, pairingToken, uri, it) }
                 .onSuccess(delivered::add)
                 .onFailure { error ->
                     failures += FileFailure(name, error.message ?: error.javaClass.simpleName)
@@ -61,11 +67,22 @@ internal class LanKuuSender(private val resolver: ContentResolver) {
         return BatchResult(delivered, failures)
     }
 
-    private fun sendFile(host: String, port: Int, uri: Uri, details: Pair<String, Long>): String {
+    private fun sendFile(
+        host: String,
+        port: Int,
+        pairingToken: String,
+        uri: Uri,
+        details: Pair<String, Long>,
+    ): String {
         val (name, size) = details
         require(size >= 0) { "The selected file does not report its size" }
         resolver.openInputStream(uri)?.use { input ->
-            send(host, port, LanKuuProtocol.Header(LanKuuProtocol.Kind.FILE, name, size), input)
+            send(
+                host,
+                port,
+                LanKuuProtocol.Header(LanKuuProtocol.Kind.FILE, name, size, pairingToken),
+                input,
+            )
         } ?: error("Could not open the selected file")
         return name
     }

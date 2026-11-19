@@ -7,6 +7,7 @@ internal data class LanKuuConnection(
     val transferPort: Int = LanKuuProtocol.transferPort,
     val mirrorPort: Int = MirrorProtocol.port,
     val name: String = "LanKuu Desktop",
+    val pairingToken: String? = null,
 ) {
     val mirrorAddress: String
         get() = if (host.contains(':')) "[$host]:$mirrorPort" else "$host:$mirrorPort"
@@ -15,7 +16,7 @@ internal data class LanKuuConnection(
         fun fromQr(rawValue: String): LanKuuConnection? {
             val uri = runCatching { Uri.parse(rawValue.trim()) }.getOrNull() ?: return null
             if (uri.scheme != "lankuu" || uri.host != "connect") return null
-            if (uri.getQueryParameter("v") != "1") return null
+            if (uri.getQueryParameter("v") != "2") return null
 
             val host = uri.getQueryParameter("host")?.trim().orEmpty()
             val transferPort = uri.getQueryParameter("transfer")?.toIntOrNull()
@@ -24,10 +25,12 @@ internal data class LanKuuConnection(
                 ?: MirrorProtocol.port
             val name = uri.getQueryParameter("name")?.trim().orEmpty()
                 .ifEmpty { "LanKuu Desktop" }
+            val pairingToken = uri.getQueryParameter("pair")?.trim().orEmpty()
 
             if (!isLocalIpv4(host)) return null
             if (transferPort !in 1..65_535 || mirrorPort !in 1..65_535) return null
-            return LanKuuConnection(host, transferPort, mirrorPort, name.take(80))
+            if (pairingToken.length !in 32..LanKuuProtocol.maxPairingTokenBytes) return null
+            return LanKuuConnection(host, transferPort, mirrorPort, name.take(80), pairingToken)
         }
 
         private fun isLocalIpv4(host: String): Boolean {

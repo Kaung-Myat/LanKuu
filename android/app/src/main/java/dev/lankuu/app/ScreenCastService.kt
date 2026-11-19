@@ -40,15 +40,19 @@ class ScreenCastService : Service() {
 
         val host = intent?.getStringExtra(EXTRA_HOST)?.trim().orEmpty()
         val port = intent?.getIntExtra(EXTRA_PORT, MirrorProtocol.port) ?: MirrorProtocol.port
+        val pairingToken = intent?.getStringExtra(EXTRA_PAIRING_TOKEN).orEmpty()
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         val resultData = intent?.projectionData()
-        if (host.isEmpty() || port !in 1..65_535 || resultCode == 0 || resultData == null) {
+        if (
+            host.isEmpty() || port !in 1..65_535 || pairingToken.length !in 32..LanKuuProtocol.maxPairingTokenBytes ||
+                resultCode == 0 || resultData == null
+        ) {
             fail(getString(R.string.mirror_invalid_request))
             return START_NOT_STICKY
         }
 
         connectThread = Thread(
-            { connect(host, port, resultData) },
+            { connect(host, port, pairingToken, resultData) },
             "lankuu-webrtc-connect",
         ).apply { start() }
         return START_NOT_STICKY
@@ -61,12 +65,12 @@ class ScreenCastService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun connect(host: String, port: Int, projectionData: Intent) {
+    private fun connect(host: String, port: Int, pairingToken: String, projectionData: Intent) {
         try {
             val client = WebRtcMirrorClient(
                 context = this,
                 projectionData = projectionData,
-                endpoint = MirrorEndpoint(host, port),
+                endpoint = MirrorEndpoint(host, port, pairingToken),
                 onConnected = connected@{
                     if (!running.get()) return@connected
                     mainHandler.post {
@@ -186,6 +190,7 @@ class ScreenCastService : Service() {
         const val ACTION_STOP = "dev.lankuu.app.STOP_MIRROR"
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
+        const val EXTRA_PAIRING_TOKEN = "pairing_token"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val EXTRA_RUNNING = "running"

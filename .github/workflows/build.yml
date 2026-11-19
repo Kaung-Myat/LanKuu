@@ -12,6 +12,7 @@ on:
       - "crates/**"
       - "desktop/**"
       - "android/**"
+      - "scripts/**"
 
 permissions:
   contents: read
@@ -35,7 +36,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LanKuu-0.5.2-Android
+          name: LanKuu-0.6.0-Android
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -48,29 +49,28 @@ jobs:
         include:
           - label: Ubuntu x64
             os: ubuntu-22.04
-            args: --bundles deb,appimage
+            args: --bundles deb
             targets: ""
-            artifact: LanKuu-0.5.2-Ubuntu-x64
+            artifact: LanKuu-0.6.0-Ubuntu-x64
             files: |
               target/release/bundle/deb/*.deb
-              target/release/bundle/appimage/*.AppImage
           - label: Windows x64
             os: windows-latest
             args: --bundles nsis
             targets: ""
-            artifact: LanKuu-0.5.2-Windows-x64
+            artifact: LanKuu-0.6.0-Windows-x64
             files: target/release/bundle/nsis/*.exe
           - label: macOS Apple Silicon
-            os: macos-latest
+            os: macos-15
             args: --target aarch64-apple-darwin --bundles dmg
             targets: aarch64-apple-darwin
-            artifact: LanKuu-0.5.2-macOS-Apple-Silicon
+            artifact: LanKuu-0.6.0-macOS-Apple-Silicon
             files: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           - label: macOS Intel
-            os: macos-latest
+            os: macos-15-intel
             args: --target x86_64-apple-darwin --bundles dmg
             targets: x86_64-apple-darwin
-            artifact: LanKuu-0.5.2-macOS-Intel
+            artifact: LanKuu-0.6.0-macOS-Intel
             files: target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
 
     steps:
@@ -90,6 +90,16 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad gstreamer1.0-libav
+
+      - name: Install native macOS mirror runtime source
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg@8
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+
+      - name: Bundle and smoke-test mirror player
+        shell: bash
+        run: python3 scripts/fetch-mirror-player.py
 
       - name: Build desktop bundle
         uses: tauri-apps/tauri-action@v1

@@ -24,18 +24,6 @@
 
       <div class="workspace">
         <aside class="sidebar">
-          <nav class="primary-nav" aria-label="Primary navigation">
-            <button class="nav-item active" id="nav-share" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg><span>Share</span>
-            </button>
-            <button class="nav-item" id="nav-mirror" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H4V5Zm5 15h6M7 9a5 5 0 0 1 5 5M7 12a2 2 0 0 1 2 2" /></svg><span>Mirror</span>
-            </button>
-            <button class="nav-item" id="nav-inbox" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm0 9h4l2 2h4l2-2h4" /></svg><span>Inbox</span><span class="nav-badge" id="inbox-badge" hidden>0</span>
-            </button>
-          </nav>
-
           <div class="sidebar-section">
             <div class="section-heading">
               <span>Nearby devices</span>
@@ -110,7 +98,7 @@
               </section>
             </div>
 
-            <footer class="app-footer"><span>LanKuu 0.5</span><span id="footer-status">Ready on your local network</span></footer>
+            <footer class="app-footer"><span>LanKuu 0.6</span><span id="footer-status">Ready on your local network</span></footer>
           </section>
 
           <section class="app-view" id="mirror-view" aria-labelledby="mirror-title" hidden>
@@ -182,7 +170,56 @@
           </section>
         </main>
       </div>
+      <nav class="primary-nav floating-nav" aria-label="Primary navigation">
+        <button class="nav-item active" id="nav-share" type="button" aria-label="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg><span>Share</span></button>
+        <button class="nav-item" id="nav-mirror" type="button" aria-label="Mirror"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H4V5Zm5 15h6M7 9a5 5 0 0 1 5 5M7 12a2 2 0 0 1 2 2" /></svg><span>Mirror</span></button>
+        <button class="nav-item" id="nav-inbox" type="button" aria-label="Inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm0 9h4l2 2h4l2-2h4" /></svg><span>Inbox</span><span class="nav-badge" id="inbox-badge" hidden>0</span></button>
+      </nav>
       <div class="toast" id="toast" role="status"></div>
+    </div>
+    <div class="setup-overlay" id="setup-overlay" role="dialog" aria-modal="true" aria-labelledby="setup-title" hidden>
+      <section class="setup-window">
+        <div class="setup-visual" aria-hidden="true">
+          <img src="./lankuu-red-panda.png" alt="" />
+          <span class="setup-orbit setup-orbit-one"></span>
+          <span class="setup-orbit setup-orbit-two"></span>
+        </div>
+        <div class="setup-content">
+          <div class="setup-progress" aria-label="Setup progress">
+            <span class="active"></span><span></span><span></span><span></span>
+          </div>
+          <div class="setup-step active" data-setup-step="0">
+            <span class="label">Welcome to LanKuu</span>
+            <h1 id="setup-title">Everything you need, already included.</h1>
+            <p>Share files, text and links, or mirror an Android screen—without installing developer tools or extra media packages.</p>
+          </div>
+          <div class="setup-step" data-setup-step="1" hidden>
+            <span class="label">Component check</span>
+            <h1>Checking your mirror runtime</h1>
+            <p>LanKuu verifies the native player bundled for this computer before enabling the app.</p>
+            <div class="setup-check" id="setup-runtime-check">
+              <span class="setup-check-icon" id="setup-check-icon">…</span>
+              <div><strong id="setup-check-title">Checking screen mirroring</strong><small id="setup-check-detail">Please wait a moment.</small></div>
+            </div>
+          </div>
+          <div class="setup-step" data-setup-step="2" hidden>
+            <span class="label">Private by design</span>
+            <h1>Your devices talk directly.</h1>
+            <p>LanKuu keeps transfers on your local network. Pair with the desktop QR code, then use Share, Mirror and Inbox from the floating menu.</p>
+            <ul class="setup-benefits"><li>QR-secured device pairing</li><li>Encrypted screen mirroring</li><li>No cloud storage</li></ul>
+          </div>
+          <div class="setup-step" data-setup-step="3" hidden>
+            <span class="label">Ready</span>
+            <h1>LanKuu is ready to use.</h1>
+            <p>The required components passed their checks. Connect your phone by scanning the QR code in the sidebar.</p>
+          </div>
+          <div class="setup-error" id="setup-error" role="alert" hidden></div>
+          <div class="setup-actions">
+            <button class="secondary-action" id="setup-previous" type="button" disabled>Previous</button>
+            <button class="primary-button" id="setup-next" type="button">Next</button>
+          </div>
+        </div>
+      </section>
     </div>
     <script src="app.js"></script>
   </body>

@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -141,6 +142,7 @@ struct IncomingOffer {
     device_id: String,
     device_name: String,
     platform: String,
+    pairing_token: String,
 }
 
 struct RegisteredSession {
@@ -346,6 +348,7 @@ pub fn run(
     receiver_stop: Arc<AtomicBool>,
     sessions: SessionRegistry,
     app: AppHandle,
+    expected_pairing_token: String,
 ) -> Result<(), String> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -359,6 +362,7 @@ pub fn run(
                 let worker_stop = Arc::clone(&receiver_stop);
                 let worker_sessions = sessions.clone();
                 let worker_app = app.clone();
+                let expected_pairing_token = expected_pairing_token.clone();
                 let runtime_handle = runtime.handle().clone();
                 workers.push(thread::spawn(move || {
                     if let Err(error) = configure_signal_stream(&stream) {
@@ -372,6 +376,10 @@ pub fn run(
                             return;
                         }
                     };
+                    if offer.pairing_token != expected_pairing_token {
+                        let _ = write_error(&mut stream, "this device has not been paired");
+                        return;
+                    }
                     let registered =
                         match worker_sessions.register(&offer, peer_address.ip().to_string()) {
                             Ok(session) => session,
@@ -756,9 +764,14 @@ async fn run_native_session(
     Ok(())
 }
 
+pub fn ensure_player() -> Result<(), String> {
+    player_program().map(|_| ())
+}
+
 fn start_player(device_name: &str) -> Result<(Child, ChildStdin), String> {
     let title = player_window_title(device_name);
-    let mut command = Command::new("ffplay");
+    let program = player_program()?;
+    let mut command = player_command(&program);
     // Do not use `-fflags nobuffer` here: for a raw H.264 pipe it can discard
     // the first IDR during stream probing, leaving a black window until the
     // encoder produces another key frame.
@@ -791,7 +804,7 @@ fn start_player(device_name: &str) -> Result<(Child, ChildStdin), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|error| format!("could not open the separate mirror window: {error}"))?;
+        .map_err(|error| player_spawn_error(&error))?;
     let input = child
         .stdin
         .take()
@@ -801,6 +814,105 @@ fn start_player(device_name: &str) -> Result<(Child, ChildStdin), String> {
 
 fn player_window_title(device_name: &str) -> String {
     format!("LanKuu Mirror · {device_name}")
+}
+
+fn player_program() -> Result<PathBuf, String> {
+    for candidate in bundled_player_candidates() {
+        if candidate.is_file() && player_runs(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    let path_name = PathBuf::from(if cfg!(windows) {
+        "ffplay.exe"
+    } else {
+        "ffplay"
+    });
+    if player_runs(&path_name) {
+        return Ok(path_name);
+    }
+    Err(missing_player_message())
+}
+
+fn bundled_player_candidates() -> Vec<PathBuf> {
+    let Ok(executable) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    let Some(start) = executable.parent().map(Path::to_path_buf) else {
+        return Vec::new();
+    };
+    bundled_player_candidates_from(&start)
+}
+
+fn bundled_player_candidates_from(start: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    let resource_locations = [
+        "",
+        "mirror-player",
+        "resources/mirror-player",
+        "Resources/mirror-player",
+        "Resources/resources/mirror-player",
+        "lib/LanKuu/resources/mirror-player",
+    ];
+
+    for ancestor in start.ancestors().take(6) {
+        for relative in resource_locations {
+            let directory = ancestor.join(relative);
+            if !seen.insert(directory.clone()) {
+                continue;
+            }
+            for name in ["ffplay.exe", "ffplay"] {
+                let candidate = directory.join(name);
+                if candidate.is_file() {
+                    found.push(candidate);
+                }
+            }
+        }
+    }
+    found
+}
+
+fn player_command(program: &Path) -> Command {
+    let mut command = Command::new(program);
+    if program.is_absolute() {
+        if let Some(directory) = program.parent() {
+            command.current_dir(directory);
+            #[cfg(target_os = "macos")]
+            command.env("DYLD_FALLBACK_LIBRARY_PATH", directory);
+            #[cfg(target_os = "linux")]
+            command.env("LD_LIBRARY_PATH", directory);
+        }
+    }
+    hide_player_console(&mut command);
+    command
+}
+
+fn player_runs(program: &Path) -> bool {
+    let mut command = player_command(program);
+    command
+        .arg("-version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn hide_player_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let _ = command;
+}
+
+fn missing_player_message() -> String {
+    "The bundled screen-mirroring runtime is unavailable. Reinstall LanKuu with the official installer.".to_owned()
+}
+
+fn player_spawn_error(error: &std::io::Error) -> String {
+    format!("could not open the separate mirror window: {error}")
 }
 
 fn complete_player_request(
@@ -974,6 +1086,7 @@ fn parse_offer(body: &[u8]) -> Result<IncomingOffer, String> {
         device_id: json_string(&value, "deviceId", "legacy-device"),
         device_name: json_string(&value, "deviceName", "Android device"),
         platform: json_string(&value, "platform", "android"),
+        pairing_token: json_string(&value, "pairingToken", ""),
     })
 }
 
@@ -1152,6 +1265,25 @@ mod tests {
         assert!(is_ignorable_h264_payload(&[0x1c, 0x80]));
         assert!(!is_ignorable_h264_payload(&[0x09, 0x10]));
         assert!(!is_ignorable_h264_payload(&[0x1c, 0x80, 0x65]));
+    }
+
+    #[test]
+    fn finds_the_debian_bundle_runtime_from_usr_bin() {
+        let root = std::env::temp_dir().join(format!(
+            "lankuu-player-layout-{}-{}",
+            std::process::id(),
+            now_millis()
+        ));
+        let bin = root.join("usr/bin");
+        let player = root.join("usr/lib/LanKuu/resources/mirror-player/ffplay");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(player.parent().unwrap()).unwrap();
+        std::fs::write(&player, b"test player").unwrap();
+
+        let candidates = bundled_player_candidates_from(&bin);
+        assert!(candidates.contains(&player));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

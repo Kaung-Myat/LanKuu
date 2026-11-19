@@ -34,6 +34,7 @@ struct DesktopState {
     mirror: Mutex<Option<MirrorTask>>,
     mirror_sessions: mirror::SessionRegistry,
     next_transfer_id: AtomicU64,
+    pairing_token: String,
 }
 
 impl Default for DesktopState {
@@ -43,6 +44,11 @@ impl Default for DesktopState {
             mirror: Mutex::new(None),
             mirror_sessions: mirror::SessionRegistry::default(),
             next_transfer_id: AtomicU64::new(1),
+            pairing_token: format!(
+                "{:032x}{:032x}",
+                rand::random::<u128>(),
+                rand::random::<u128>()
+            ),
         }
     }
 }
@@ -89,6 +95,14 @@ struct ConnectionCodeView {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SetupStatusView {
+    platform: &'static str,
+    mirror_player_ready: bool,
+    mirror_player_detail: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TransferEvent {
     id: u64,
     direction: &'static str,
@@ -119,24 +133,25 @@ async fn discover_devices() -> Result<Vec<DeviceView>, String> {
 }
 
 #[tauri::command]
-fn connection_code() -> Result<ConnectionCodeView, String> {
+fn connection_code(state: State<'_, DesktopState>) -> Result<ConnectionCodeView, String> {
     let address = local_network_address();
     if address == "Your desktop IP" {
         return Err("could not determine this desktop's local network address".to_owned());
     }
     let device_name = device_name();
     let uri = format!(
-        "lankuu://connect?v=1&host={}&transfer={}&mirror={}&name={}",
+        "lankuu://connect?v=2&host={}&transfer={}&mirror={}&name={}&pair={}",
         percent_encode(&address),
         DEFAULT_TRANSFER_PORT,
         mirror::SIGNAL_PORT,
         percent_encode(&device_name),
+        percent_encode(&state.pairing_token),
     );
     let code = QrCode::new(uri.as_bytes()).map_err(|error| error.to_string())?;
     let svg = code
         .render::<svg::Color>()
         .min_dimensions(256, 256)
-        .dark_color(svg::Color("#19182A"))
+        .dark_color(svg::Color("#111111"))
         .light_color(svg::Color("#FFFFFF"))
         .build();
     Ok(ConnectionCodeView {
@@ -150,7 +165,13 @@ fn connection_code() -> Result<ConnectionCodeView, String> {
 }
 
 #[tauri::command]
-async fn send_text(app: AppHandle, host: String, port: u16, text: String) -> Result<(), String> {
+async fn send_text(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    host: String,
+    port: u16,
+    text: String,
+) -> Result<(), String> {
     let id = app.state::<DesktopState>().transfer_id();
     let total = text.len() as u64;
     emit_transfer(
@@ -168,6 +189,7 @@ async fn send_text(app: AppHandle, host: String, port: u16, text: String) -> Res
     );
 
     let worker_app = app.clone();
+    let pairing_token = state.pairing_token.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut emitter = ProgressEmitter::new(
             worker_app.clone(),
@@ -176,8 +198,10 @@ async fn send_text(app: AppHandle, host: String, port: u16, text: String) -> Res
             "text",
             "Text message".to_owned(),
         );
-        send_text_over_lan(&host, port, &text, |sent, size| emitter.update(sent, size))
-            .map_err(|error| error.to_string())
+        send_text_over_lan(&host, port, &pairing_token, &text, |sent, size| {
+            emitter.update(sent, size)
+        })
+        .map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| format!("text transfer task failed: {error}"))?;
@@ -188,6 +212,7 @@ async fn send_text(app: AppHandle, host: String, port: u16, text: String) -> Res
 #[tauri::command]
 async fn send_files(
     app: AppHandle,
+    state: State<'_, DesktopState>,
     host: String,
     port: u16,
     paths: Vec<String>,
@@ -197,6 +222,7 @@ async fn send_files(
     }
 
     let worker_app = app.clone();
+    let pairing_token = state.pairing_token.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut delivered = 0_usize;
         for raw_path in paths {
@@ -224,10 +250,11 @@ async fn send_files(
 
             let mut emitter =
                 ProgressEmitter::new(worker_app.clone(), id, "send", "file", name.clone());
-            let result =
-                send_file_over_lan(&host, port, &path, |sent, size| emitter.update(sent, size))
-                    .map(|_| ())
-                    .map_err(|error| error.to_string());
+            let result = send_file_over_lan(&host, port, &pairing_token, &path, |sent, size| {
+                emitter.update(sent, size)
+            })
+            .map(|_| ())
+            .map_err(|error| error.to_string());
 
             let succeeded = result.is_ok();
             let completion = finish_transfer(&worker_app, id, "send", "file", &name, total, result);
@@ -267,6 +294,7 @@ fn start_receiver(app: AppHandle, state: State<'_, DesktopState>) -> Result<Rece
     let device_name = device_name();
     let thread_app = app.clone();
     let thread_output = output.clone();
+    let pairing_token = state.pairing_token.clone();
     let task = thread::spawn(move || {
         let responder =
             spawn_discovery_responder(device_name, DEFAULT_TRANSFER_PORT, responder_stop);
@@ -275,7 +303,13 @@ fn start_receiver(app: AppHandle, state: State<'_, DesktopState>) -> Result<Rece
         while !thread_stop.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((stream, peer)) => {
-                    handle_incoming(&thread_app, stream, peer.ip().to_string(), &thread_output);
+                    handle_incoming(
+                        &thread_app,
+                        stream,
+                        peer.ip().to_string(),
+                        &thread_output,
+                        &pairing_token,
+                    );
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(120));
@@ -356,6 +390,7 @@ fn start_mirror_receiver(
     let thread_stop = Arc::clone(&stop);
     let thread_app = app.clone();
     let thread_sessions = state.mirror_sessions.clone();
+    let pairing_token = state.pairing_token.clone();
     let task = thread::spawn(move || {
         emit_mirror_status(&thread_app, true);
         if let Err(error) = mirror::run(
@@ -363,6 +398,7 @@ fn start_mirror_receiver(
             Arc::clone(&thread_stop),
             thread_sessions.clone(),
             thread_app.clone(),
+            pairing_token,
         ) {
             if !thread_stop.load(Ordering::Relaxed) {
                 let _ = thread_app.emit("app-error", format!("WebRTC receiver stopped: {error}"));
@@ -475,7 +511,13 @@ fn close_window(window: WebviewWindow) -> Result<(), String> {
     window.close().map_err(|error| error.to_string())
 }
 
-fn handle_incoming(app: &AppHandle, stream: std::net::TcpStream, peer: String, output: &Path) {
+fn handle_incoming(
+    app: &AppHandle,
+    stream: std::net::TcpStream,
+    peer: String,
+    output: &Path,
+    pairing_token: &str,
+) {
     let id = app.state::<DesktopState>().transfer_id();
     let name = Arc::new(Mutex::new("Incoming transfer".to_owned()));
     let kind = Arc::new(Mutex::new("file"));
@@ -490,6 +532,7 @@ fn handle_incoming(app: &AppHandle, stream: std::net::TcpStream, peer: String, o
     let result = receive_one(
         stream,
         output,
+        pairing_token,
         move |header: &Header| {
             if let Ok(mut value) = started_name.lock() {
                 *value = if header.kind == PayloadKind::Text {
@@ -725,13 +768,33 @@ fn mirror_view(running: bool) -> MirrorView {
 }
 
 fn local_network_address() -> String {
-    UdpSocket::bind(("0.0.0.0", 0))
-        .and_then(|socket| {
-            socket.connect(("1.1.1.1", 80))?;
-            socket.local_addr()
-        })
-        .map(|address| address.ip().to_string())
-        .unwrap_or_else(|_| "Your desktop IP".to_owned())
+    // Connecting a UDP socket never sends a packet, but it asks the operating
+    // system which local interface would reach the destination.  Use private
+    // and link-local destinations here rather than a public resolver: LanKuu
+    // must be able to make a connection QR code on an isolated LAN with no
+    // Internet route.
+    const LOCAL_ROUTE_PROBES: [(&str, u16); 4] = [
+        ("192.168.1.1", 9),
+        ("10.0.0.1", 9),
+        ("172.16.0.1", 9),
+        ("169.254.1.1", 9),
+    ];
+
+    for destination in LOCAL_ROUTE_PROBES {
+        let address = UdpSocket::bind(("0.0.0.0", 0))
+            .and_then(|socket| {
+                socket.connect(destination)?;
+                socket.local_addr()
+            })
+            .map(|address| address.ip());
+        if let Ok(std::net::IpAddr::V4(address)) = address {
+            if !address.is_unspecified() && !address.is_loopback() {
+                return address.to_string();
+            }
+        }
+    }
+
+    "Your desktop IP".to_owned()
 }
 
 fn download_directory() -> PathBuf {
@@ -766,25 +829,24 @@ fn percent_encode(value: &str) -> String {
     })
 }
 
-#[cfg(target_os = "linux")]
 fn ensure_mirror_runtime() -> Result<(), String> {
-    let player_available = Command::new("ffplay")
-        .arg("-version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if !player_available {
-        return Err(
-            "Ubuntu mirror player is missing. Install ffmpeg, then restart LanKuu.".to_owned(),
-        );
-    }
-    Ok(())
+    mirror::ensure_player()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn ensure_mirror_runtime() -> Result<(), String> {
-    Ok(())
+#[tauri::command]
+fn setup_status() -> SetupStatusView {
+    match ensure_mirror_runtime() {
+        Ok(()) => SetupStatusView {
+            platform: std::env::consts::OS,
+            mirror_player_ready: true,
+            mirror_player_detail: "Screen mirroring runtime is installed and verified.".to_owned(),
+        },
+        Err(error) => SetupStatusView {
+            platform: std::env::consts::OS,
+            mirror_player_ready: false,
+            mirror_player_detail: error,
+        },
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -800,6 +862,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            setup_status,
             connection_code,
             discover_devices,
             send_text,

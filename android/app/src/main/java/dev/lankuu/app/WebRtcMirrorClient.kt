@@ -168,6 +168,7 @@ internal class WebRtcMirrorClient(
             .put("deviceId", deviceId())
             .put("deviceName", deviceName())
             .put("platform", "android")
+            .put("pairingToken", endpoint.pairingToken)
             .toString()
             .toByteArray(StandardCharsets.UTF_8)
         require(request.size <= MAX_SIGNAL_BYTES) { "WebRTC offer is too large" }

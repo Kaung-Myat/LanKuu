@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
 internal class LanKuuReceiver(
     private val context: Context,
     private val report: (String) -> Unit,
+    private val pairingToken: () -> String?,
 ) {
     private val running = AtomicBoolean(false)
     private val generation = AtomicInteger(0)
@@ -116,6 +117,7 @@ internal class LanKuuReceiver(
             val output = DataOutputStream(it.getOutputStream())
             try {
                 val header = LanKuuProtocol.readHeader(input)
+                require(header.pairingToken == pairingToken()) { "This device has not been paired" }
                 when (header.kind) {
                     LanKuuProtocol.Kind.TEXT -> receiveText(input, header)
                     LanKuuProtocol.Kind.FILE -> receiveFile(input, header)
@@ -168,32 +170,34 @@ internal class LanKuuReceiver(
     private fun discoveryLoop(session: Int, transferPort: Int) {
         var localSocket: DatagramSocket? = null
         try {
-            val socket = DatagramSocket(null).also {
-                it.reuseAddress = true
-                it.bind(InetSocketAddress(LanKuuProtocol.discoveryPort))
-                it.soTimeout = 300
-            }
-            localSocket = socket
-            if (!isSessionActive(session)) {
-                socket.close()
-                return
-            }
-            discoverySocket = socket
-            val buffer = ByteArray(128)
-            val deviceName = Build.MODEL.replace('|', '_')
-            val response = (
-                "${LanKuuProtocol.discoveryResponsePrefix}|$deviceName|$transferPort"
-            ).toByteArray(StandardCharsets.UTF_8)
+            LanKuuDiscovery.withMulticastLock(context) {
+                val socket = DatagramSocket(null).also {
+                    it.reuseAddress = true
+                    it.bind(InetSocketAddress(LanKuuProtocol.discoveryPort))
+                    it.soTimeout = 300
+                }
+                localSocket = socket
+                if (!isSessionActive(session)) {
+                    socket.close()
+                    return@withMulticastLock
+                }
+                discoverySocket = socket
+                val buffer = ByteArray(128)
+                val deviceName = Build.MODEL.replace('|', '_')
+                val response = (
+                    "${LanKuuProtocol.discoveryResponsePrefix}|$deviceName|$transferPort"
+                ).toByteArray(StandardCharsets.UTF_8)
 
-            while (isSessionActive(session)) {
-                val request = DatagramPacket(buffer, buffer.size)
-                try {
-                    socket.receive(request)
-                    if (request.data.copyOf(request.length).contentEquals(LanKuuProtocol.discoveryQuery)) {
-                        socket.send(DatagramPacket(response, response.size, request.address, request.port))
+                while (isSessionActive(session)) {
+                    val request = DatagramPacket(buffer, buffer.size)
+                    try {
+                        socket.receive(request)
+                        if (request.data.copyOf(request.length).contentEquals(LanKuuProtocol.discoveryQuery)) {
+                            socket.send(DatagramPacket(response, response.size, request.address, request.port))
+                        }
+                    } catch (_: SocketTimeoutException) {
+                        // Re-check the running flag.
                     }
-                } catch (_: SocketTimeoutException) {
-                    // Re-check the running flag.
                 }
             }
         } catch (error: Exception) {

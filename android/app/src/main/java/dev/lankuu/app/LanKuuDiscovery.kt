@@ -1,5 +1,7 @@
 package dev.lankuu.app
 
+import android.content.Context
+import android.net.wifi.WifiManager
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -9,37 +11,52 @@ import java.nio.charset.StandardCharsets
 internal object LanKuuDiscovery {
     data class Device(val name: String, val host: String, val port: Int)
 
-    fun discover(timeoutMillis: Long = 2_000): List<Device> {
+    fun discover(context: Context, timeoutMillis: Long = 2_000): List<Device> {
         val found = linkedMapOf<String, Device>()
-        DatagramSocket().use { socket ->
-            socket.broadcast = true
-            socket.soTimeout = 250
-            val broadcast = InetAddress.getByName("255.255.255.255")
-            socket.send(
-                DatagramPacket(
-                    LanKuuProtocol.discoveryQuery,
-                    LanKuuProtocol.discoveryQuery.size,
-                    broadcast,
-                    LanKuuProtocol.discoveryPort,
-                ),
-            )
+        withMulticastLock(context) {
+            DatagramSocket().use { socket ->
+                socket.broadcast = true
+                socket.soTimeout = 250
+                val broadcast = InetAddress.getByName("255.255.255.255")
+                socket.send(
+                    DatagramPacket(
+                        LanKuuProtocol.discoveryQuery,
+                        LanKuuProtocol.discoveryQuery.size,
+                        broadcast,
+                        LanKuuProtocol.discoveryPort,
+                    ),
+                )
 
-            val deadline = System.currentTimeMillis() + timeoutMillis
-            val buffer = ByteArray(512)
-            while (System.currentTimeMillis() < deadline) {
-                val packet = DatagramPacket(buffer, buffer.size)
-                try {
-                    socket.receive(packet)
-                    val message = String(packet.data, 0, packet.length, StandardCharsets.UTF_8)
-                    parse(message, packet.address.hostAddress ?: continue)?.let { device ->
-                        found["${device.host}:${device.port}"] = device
+                val deadline = System.currentTimeMillis() + timeoutMillis
+                val buffer = ByteArray(512)
+                while (System.currentTimeMillis() < deadline) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    try {
+                        socket.receive(packet)
+                        val message = String(packet.data, 0, packet.length, StandardCharsets.UTF_8)
+                        parse(message, packet.address.hostAddress ?: continue)?.let { device ->
+                            found["${device.host}:${device.port}"] = device
+                        }
+                    } catch (_: SocketTimeoutException) {
+                        // Keep collecting until the overall deadline.
                     }
-                } catch (_: SocketTimeoutException) {
-                    // Keep collecting until the overall deadline.
                 }
             }
         }
         return found.values.toList()
+    }
+
+    inline fun <T> withMulticastLock(context: Context, block: () -> T): T {
+        val manager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val lock = manager?.createMulticastLock("lankuu-discovery")?.apply {
+            setReferenceCounted(false)
+        }
+        try {
+            lock?.acquire()
+            return block()
+        } finally {
+            if (lock?.isHeld == true) lock.release()
+        }
     }
 
     private fun parse(message: String, host: String): Device? {

@@ -3,6 +3,9 @@
 /android/**/build/
 /android/local.properties
 /desktop/src-tauri/gen/
+/desktop/src-tauri/resources/mirror-player/*
+!/desktop/src-tauri/resources/mirror-player/.gitkeep
 *.part
+__pycache__/
 .idea/
 *.iml

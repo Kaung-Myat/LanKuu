@@ -1,6 +1,6 @@
-# LanKuu wire protocol v1
+# LanKuu wire protocol v2
 
-LanKuu v1 uses one TCP connection per payload. Multi-byte integers are unsigned
+LanKuu v2 uses one TCP connection per payload. Multi-byte integers are unsigned
 and encoded in network byte order (big endian). File bytes are streamed and are
 never wrapped in JSON or Base64.
 
@@ -13,11 +13,13 @@ Default ports:
 
 | Field | Size | Value |
 |---|---:|---|
-| Magic | 8 bytes | ASCII `LANKUU01` |
+| Magic | 8 bytes | ASCII `LANKUU02` |
 | Kind | 1 byte | `1` text, `2` file |
 | Name length | 2 bytes | UTF-8 name byte count |
 | Payload length | 8 bytes | Payload byte count |
+| Pairing-token length | 2 bytes | UTF-8 token byte count |
 | Name | variable | UTF-8, maximum 1024 bytes |
+| Pairing token | variable | UTF-8, maximum 128 bytes |
 | Payload | variable | Raw text or file bytes |
 
 After consuming exactly the declared payload length, the receiver returns a
@@ -32,12 +34,12 @@ not publish a partial file.
 
 ### Multi-file batches
 
-A multi-file selection is sent as an ordered sequence of independent v1 file
+A multi-file selection is sent as an ordered sequence of independent v2 file
 transfers. The sender waits for the `OK` or `ER` acknowledgment for the current
 file before opening the next connection. A failed file does not cancel the
 remaining selection, so the sender can report complete, partial, and failed
-batch results without changing the wire format. Existing v1 Ubuntu and Android
-receivers therefore remain compatible with multi-file sending.
+batch results without changing the wire format. The receiver validates the
+pairing token before accepting any payload.
 
 Text payloads are UTF-8 and limited to 16 MiB. Receivers must discard directory
 components and control characters from incoming file names.
@@ -66,6 +68,6 @@ payload kinds instead of guessing.
 
 ## Security status
 
-Version 1 is an MVP interoperability protocol. It provides framing and TCP
-delivery only; it does not provide identity, authorization, confidentiality,
-or application-level integrity. These are required before a stable release.
+Version 2 rejects an unpaired sender before its text or file payload is read.
+The token authorizes a scanned device but does not encrypt file/text bytes;
+transport encryption remains necessary for confidentiality.

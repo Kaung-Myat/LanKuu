@@ -1,6 +1,6 @@
 package dev.lankuu.app
 
-internal data class MirrorEndpoint(val host: String, val port: Int) {
+internal data class MirrorEndpoint(val host: String, val port: Int, val pairingToken: String? = null) {
     companion object {
         fun parse(rawValue: String): MirrorEndpoint? {
             val value = rawValue.trim()

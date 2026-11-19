@@ -32,6 +32,7 @@ Examples:
   lankuu send-text 192.168.1.42 "hello from Ubuntu"
 
 MVP note: traffic is not encrypted yet. Use LanKuu only on a trusted LAN.
+Pairing note: set LANKUU_PAIRING_TOKEN to the token embedded in the receiver's QR code.
 "#;
 
 type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
@@ -75,6 +76,7 @@ fn receive_command(arguments: &[String]) -> AppResult<()> {
     let mut output = default_download_directory();
     let mut device_name = hostname();
     let mut once = false;
+    let pairing_token = pairing_token()?;
 
     let mut index = 0;
     while index < arguments.len() {
@@ -109,7 +111,7 @@ fn receive_command(arguments: &[String]) -> AppResult<()> {
             Ok(stream) => {
                 let peer = stream.peer_addr()?;
                 println!("Incoming connection from {peer}");
-                if let Err(error) = receive_one(stream, &output) {
+                if let Err(error) = receive_one(stream, &output, &pairing_token) {
                     eprintln!("Transfer from {peer} failed: {error}");
                 }
                 if once {
@@ -127,8 +129,8 @@ fn receive_command(arguments: &[String]) -> AppResult<()> {
     Ok(())
 }
 
-fn receive_one(stream: TcpStream, output: &Path) -> AppResult<()> {
-    match network::receive_one(stream, output, |_| {}, |_, _| {})? {
+fn receive_one(stream: TcpStream, output: &Path, pairing_token: &str) -> AppResult<()> {
+    match network::receive_one(stream, output, pairing_token, |_| {}, |_, _| {})? {
         ReceivedPayload::Text { text, .. } => {
             println!("\nText received:\n{}\n", terminal_safe(&text));
         }
@@ -153,6 +155,7 @@ fn terminal_safe(text: &str) -> String {
 }
 
 fn send_file_command(arguments: &[String]) -> AppResult<()> {
+    let pairing_token = pairing_token()?;
     let (positionals, port) = parse_port_option(arguments)?;
     if positionals.len() != 2 {
         return Err("usage: lankuu send HOST FILE [--port PORT]".into());
@@ -176,6 +179,7 @@ fn send_file_command(arguments: &[String]) -> AppResult<()> {
         kind: PayloadKind::File,
         name,
         payload_len: metadata.len(),
+        pairing_token,
     };
 
     println!(
@@ -189,6 +193,7 @@ fn send_file_command(arguments: &[String]) -> AppResult<()> {
 }
 
 fn send_text_command(arguments: &[String]) -> AppResult<()> {
+    let pairing_token = pairing_token()?;
     let (positionals, port) = parse_port_option(arguments)?;
     if positionals.len() < 2 {
         return Err("usage: lankuu send-text HOST TEXT [--port PORT]".into());
@@ -203,6 +208,7 @@ fn send_text_command(arguments: &[String]) -> AppResult<()> {
         kind: PayloadKind::Text,
         name: "message.txt".to_owned(),
         payload_len: text.len() as u64,
+        pairing_token,
     };
     let mut bytes = text.as_bytes();
 
@@ -351,6 +357,15 @@ fn required_value(arguments: &[String], index: &mut usize, option: &str) -> AppR
         .get(*index)
         .cloned()
         .ok_or_else(|| format!("{option} requires a value").into())
+}
+
+fn pairing_token() -> AppResult<String> {
+    env::var("LANKUU_PAIRING_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            "LANKUU_PAIRING_TOKEN is required; pair with the receiver QR code first".into()
+        })
 }
 
 fn default_download_directory() -> PathBuf {

@@ -69,6 +69,13 @@ const elements = {
   clearInbox: document.querySelector("#clear-inbox"),
   footerStatus: document.querySelector("#footer-status"),
   toast: document.querySelector("#toast"),
+  setupOverlay: document.querySelector("#setup-overlay"),
+  setupPrevious: document.querySelector("#setup-previous"),
+  setupNext: document.querySelector("#setup-next"),
+  setupError: document.querySelector("#setup-error"),
+  setupCheckIcon: document.querySelector("#setup-check-icon"),
+  setupCheckTitle: document.querySelector("#setup-check-title"),
+  setupCheckDetail: document.querySelector("#setup-check-detail"),
 };
 
 let toastTimer;
@@ -86,6 +93,14 @@ function reportActionError(action, error) {
   showToast(`${action} failed: ${error}`);
 }
 
+function showConnectionPlaceholder(label, address) {
+  for (const target of [elements.shareConnectionQr, elements.mirrorConnectionQr]) {
+    target.classList.remove("has-code");
+    target.textContent = label;
+  }
+  elements.connectionAddress.textContent = address;
+}
+
 function renderConnectionQr(target, svgText) {
   const documentValue = new DOMParser().parseFromString(svgText, "image/svg+xml");
   const svg = documentValue.documentElement;
@@ -93,13 +108,12 @@ function renderConnectionQr(target, svgText) {
     throw new Error("Desktop returned an invalid connection code");
   }
   target.replaceChildren(document.importNode(svg, true));
+  target.classList.add("has-code");
 }
 
 async function loadConnectionCode() {
   if (!isTauri) {
-    elements.shareConnectionQr.textContent = "QR preview";
-    elements.mirrorConnectionQr.textContent = "QR preview";
-    elements.connectionAddress.textContent = "Available in LanKuu Desktop";
+    showConnectionPlaceholder("QR preview", "Available in LanKuu Desktop");
     return;
   }
   try {
@@ -108,9 +122,7 @@ async function loadConnectionCode() {
     renderConnectionQr(elements.mirrorConnectionQr, connection.svg);
     elements.connectionAddress.textContent = `${connection.deviceName} · ${connection.address}`;
   } catch (error) {
-    elements.shareConnectionQr.textContent = "QR unavailable";
-    elements.mirrorConnectionQr.textContent = "QR unavailable";
-    elements.connectionAddress.textContent = String(error);
+    showConnectionPlaceholder("QR unavailable", String(error));
     console.error("Could not create connection code", error);
   }
 }
@@ -745,6 +757,83 @@ function savedTheme() {
   }
 }
 
+function onboardingComplete() {
+  try {
+    return localStorage.getItem("lankuu-onboarding-v1") === "complete";
+  } catch (error) {
+    console.warn("Could not read onboarding state", error);
+    return false;
+  }
+}
+
+async function runOnboarding() {
+  if (onboardingComplete() || !elements.setupOverlay) return;
+
+  elements.setupOverlay.hidden = false;
+  let currentStep = 0;
+  let runtimeReady = false;
+  const steps = [...document.querySelectorAll(".setup-step")];
+  const progress = [...document.querySelectorAll(".setup-progress span")];
+
+  const render = () => {
+    steps.forEach((step, index) => {
+      step.hidden = index !== currentStep;
+      step.classList.toggle("active", index === currentStep);
+    });
+    progress.forEach((dot, index) => dot.classList.toggle("active", index <= currentStep));
+    elements.setupPrevious.disabled = currentStep === 0;
+    elements.setupNext.textContent = currentStep === steps.length - 1 ? "Open LanKuu" : "Next";
+    elements.setupNext.disabled = currentStep === 1 && !runtimeReady;
+  };
+
+  const checkRuntime = async () => {
+    elements.setupNext.disabled = true;
+    try {
+      const status = isTauri
+        ? await invoke("setup_status")
+        : { platform: "preview", mirrorPlayerReady: true, mirrorPlayerDetail: "Preview runtime check passed." };
+      runtimeReady = status.mirrorPlayerReady;
+      elements.setupCheckIcon.textContent = runtimeReady ? "✓" : "!";
+      elements.setupCheckTitle.textContent = runtimeReady ? "All components are ready" : "Mirror runtime needs repair";
+      elements.setupCheckDetail.textContent = status.mirrorPlayerDetail;
+      document.querySelector("#setup-runtime-check")?.classList.toggle("failed", !runtimeReady);
+      elements.setupError.hidden = runtimeReady;
+      elements.setupError.textContent = runtimeReady ? "" : "Reinstall LanKuu using the official installer, then restart the app.";
+    } catch (error) {
+      runtimeReady = false;
+      elements.setupCheckIcon.textContent = "!";
+      elements.setupCheckTitle.textContent = "Could not verify components";
+      elements.setupCheckDetail.textContent = String(error);
+      elements.setupError.hidden = false;
+      elements.setupError.textContent = "LanKuu cannot enable features until this check succeeds.";
+    }
+    render();
+  };
+
+  render();
+  await new Promise((resolve) => {
+    elements.setupPrevious.addEventListener("click", () => {
+      if (currentStep > 0) currentStep -= 1;
+      render();
+    });
+    elements.setupNext.addEventListener("click", async () => {
+      if (currentStep === steps.length - 1) {
+        try {
+          localStorage.setItem("lankuu-onboarding-v1", "complete");
+        } catch (error) {
+          console.warn("Could not save onboarding state", error);
+        }
+        elements.setupOverlay.hidden = true;
+        resolve();
+        return;
+      }
+      currentStep += 1;
+      render();
+      if (currentStep === 1) await checkRuntime();
+    });
+  });
+}
+
 async function registerNativeEvents() {
   if (!isTauri) return;
   await listen("transfer-event", (event) => updateTransfer(event.payload));
@@ -852,6 +941,7 @@ async function initialize() {
   bindActions();
   const prefersDark = typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
   setTheme(savedTheme() || (prefersDark ? "dark" : "light"));
+  await runOnboarding();
   try {
     await registerNativeEvents();
   } catch (error) {

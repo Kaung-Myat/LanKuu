@@ -14,9 +14,9 @@ to an Ubuntu desktop at the same time. No account or cloud relay is required.
 
 > [!IMPORTANT]
 > LanKuu is currently an MVP. Use it only on a trusted local network. File and
-> text transfers are not yet encrypted or authenticated. WebRTC mirroring media
-> is encrypted with DTLS-SRTP, but signaling and device identity are not yet
-> authenticated.
+> text transfers require a QR pairing token but are not yet encrypted. WebRTC
+> mirror media is encrypted with DTLS-SRTP and its signaling requires the same
+> QR pairing token.
 
 ## Contents
 
@@ -114,12 +114,9 @@ Install the Debian package:
 sudo apt install ./LanKuu_*.deb
 ```
 
-The Debian package declares FFmpeg as a dependency because native mirror
-windows use `ffplay`. If you use the AppImage, install FFmpeg separately:
-
-```bash
-sudo apt install ffmpeg
-```
+The Debian installer includes the native mirror player. No separate FFmpeg,
+Android Studio, SDK, or media package setup is required. The first launch
+checks the bundled runtime before enabling LanKuu's features.
 
 Launch LanKuu and show the connection QR code. Turn on **Ready to receive** for
 files and text, or start the mirror receiver before casting.
@@ -138,8 +135,9 @@ The current CI artifact is debug-signed for MVP testing. Production signing is
 required before Play Store distribution.
 
 The QR format is documented in
-[`docs/connection-qr-v1.md`](docs/connection-qr-v1.md). UDP discovery and manual
-address entry remain available when a camera is unavailable.
+[`docs/connection-qr-v1.md`](docs/connection-qr-v1.md). QR scanning is required
+to pair before file/text transfer and screen mirroring; discovery can only show
+nearby devices, not authorize one.
 
 ### Ubuntu CLI (source build)
 
@@ -263,7 +261,7 @@ messages, compatibility, and decoder behavior.
 - Rust stable toolchain
 - Java 17 for Android builds
 - Android SDK for the APK
-- Tauri 2 Linux development packages and FFmpeg for Ubuntu desktop builds
+- Tauri 2 Linux development packages and FFmpeg for local Ubuntu development
 
 Install the Ubuntu desktop requirements:
 
@@ -317,7 +315,7 @@ Pushing a tag matching `v*` starts
 flowchart LR
     Tag[Push version tag] --> Verify[Format, Rust tests,<br/>Android lint]
     Verify --> Draft[Create draft release]
-    Draft --> Ubuntu[Ubuntu<br/>DEB and AppImage]
+    Draft --> Ubuntu[Ubuntu<br/>DEB installer]
     Draft --> Windows[Windows<br/>NSIS installer]
     Draft --> MacArm[macOS<br/>Apple Silicon DMG]
     Draft --> MacIntel[macOS<br/>Intel DMG]
