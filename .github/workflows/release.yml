@@ -128,7 +128,7 @@ jobs:
 
       - name: Install native macOS mirror runtime source
         if: runner.os == 'macOS'
-        run: brew install ffmpeg@8
+        run: brew install ffmpeg@7
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
 

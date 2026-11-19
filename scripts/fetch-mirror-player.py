@@ -115,10 +115,11 @@ def dylib_dependencies(path: Path) -> list[Path]:
 
 
 def write_macos() -> Path:
-    prefix = Path(subprocess.check_output(["brew", "--prefix", "ffmpeg@8"], text=True).strip())
+    formula = os.environ.get("LANKUU_FFMPEG_FORMULA", "ffmpeg@7")
+    prefix = Path(subprocess.check_output(["brew", "--prefix", formula], text=True).strip())
     source = prefix / "bin" / "ffplay"
     if not source.is_file():
-        sys.exit("Homebrew ffmpeg@8 is required before staging the macOS runtime")
+        sys.exit(f"Homebrew {formula} is required before staging the macOS runtime")
 
     target = DESTINATION / "ffplay"
     shutil.copy2(source, target)
@@ -149,7 +150,7 @@ def write_macos() -> Path:
     if expected_arch not in info:
         sys.exit(f"staged ffplay is not native {expected_arch}: {info.strip()}")
     (DESTINATION / "RUNTIME-NOTICE.txt").write_text(
-        "ffplay and its runtime libraries were bundled from Homebrew ffmpeg@8.\n"
+        f"ffplay and its runtime libraries were bundled from Homebrew {formula}.\n"
         "See https://ffmpeg.org/legal.html and the installer license notices.\n",
         encoding="utf-8",
     )
